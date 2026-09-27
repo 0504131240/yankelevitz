@@ -783,41 +783,6 @@ function _restoreAllFromLocalCache(){
   if(!fund.famBalances)fund.famBalances={};
 }
 let _retryTimer=null;
-// The top-level fields save() writes as one document. Tracked individually
-// (see _syncBaseline below) so a save that only touched, say, `messages`
-// doesn't blindly re-push a stale in-memory `families` and wipe out a
-// change someone else already saved to it.
-const _SYNC_FIELDS=['families','events','fund','goalFunds','savingsPot','messages','calItems','birthdays','paymentClaims','globalSettled','visits','notifications','polls','countdowns','yahrzeits','familyTree','treeScores','adminPass'];
-function _getSyncFieldValue(f){
-  switch(f){
-    case'families':return families;case'events':return events;case'fund':return fund;
-    case'goalFunds':return goalFunds;case'savingsPot':return savingsPot;case'messages':return messages;
-    case'calItems':return calItems;case'birthdays':return birthdays;case'paymentClaims':return paymentClaims;
-    case'globalSettled':return globalSettled;case'visits':return visits;case'notifications':return notifications;
-    case'polls':return polls;case'countdowns':return countdowns;case'yahrzeits':return yahrzeits;
-    case'familyTree':return familyTree;case'treeScores':return treeScores;case'adminPass':return adminPass;
-  }
-}
-function _setSyncFieldValue(f,v){
-  switch(f){
-    case'families':families=v;break;case'events':events=v;break;case'fund':fund=v;break;
-    case'goalFunds':goalFunds=v;break;case'savingsPot':savingsPot=v;break;case'messages':messages=v;break;
-    case'calItems':calItems=v;break;case'birthdays':birthdays=v;break;case'paymentClaims':paymentClaims=v;break;
-    case'globalSettled':globalSettled=v;break;case'visits':visits=v;break;case'notifications':notifications=v;break;
-    case'polls':polls=v;break;case'countdowns':countdowns=v;break;case'yahrzeits':yahrzeits=v;break;
-    case'familyTree':familyTree=v;break;case'treeScores':treeScores=v;break;case'adminPass':adminPass=v;break;
-  }
-}
-// A snapshot of every synced field exactly as it stood the last time this
-// device KNEW it matched Firestore (right after load(), after adopting a
-// realtime update, or after a successful save()) — see save()'s pre-write
-// freshness check for what this is for.
-let _syncBaseline=null;
-function _captureSyncBaseline(){
-  const snap={};
-  _SYNC_FIELDS.forEach(f=>{snap[f]=JSON.parse(JSON.stringify(_getSyncFieldValue(f)));});
-  _syncBaseline=snap;
-}
 async function save(){
   saveLocal();
   localStorage.setItem('pendingSave','1');
@@ -827,40 +792,11 @@ async function save(){
   if(_retryTimer){clearTimeout(_retryTimer);_retryTimer=null;}
   showSyncStatus('שומר...');
   try{
-    const {db,doc,setDoc,getDoc}=await fbInit();
-    // save() always pushes ALL of these fields, from whatever's sitting in
-    // memory. A tab that's gone stale (backgrounded, missed a realtime
-    // update, multiple devices open) would otherwise silently overwrite
-    // someone else's just-saved edit to a field THIS save never touched —
-    // e.g. a family editing their own details while an admin tab elsewhere
-    // saves something unrelated. So: for every field this device hasn't
-    // itself changed since its last known-good sync (still matches
-    // _syncBaseline), adopt whatever's actually in Firestore right now
-    // before writing, instead of re-pushing a possibly-stale local copy.
-    // A field we DID change locally always keeps our edit. Best-effort: if
-    // this freshness check itself fails (offline, etc.), fall back to
-    // writing local state as-is, exactly like before this existed.
-    if(_syncBaseline){
-      try{
-        const freshSnap=await getDoc(doc(db,'appData','familyPayments'));
-        if(freshSnap.exists()){
-          const fresh=freshSnap.data();
-          _SYNC_FIELDS.forEach(f=>{
-            if(fresh[f]===undefined)return;
-            const localStr=JSON.stringify(_getSyncFieldValue(f));
-            const baseStr=JSON.stringify(_syncBaseline[f]);
-            const freshStr=JSON.stringify(fresh[f]);
-            if(localStr===baseStr&&freshStr!==baseStr)_setSyncFieldValue(f,fresh[f]);
-          });
-        }
-      }catch(e){console.warn('pre-save freshness check failed, saving local state as-is:',e);}
-    }
+    const {db,doc,setDoc}=await fbInit();
     await setDoc(doc(db,'appData','familyPayments'),{families,events,fund,goalFunds,savingsPot,adminPass,messages,calItems,birthdays,paymentClaims,globalSettled,visits,notifications,polls,countdowns,yahrzeits,familyTree,treeScores});
-    _captureSyncBaseline();
     localStorage.removeItem('pendingSave');
     localStorage.removeItem('pendingSaveAt');
     showSyncStatus('✓ נשמר',2000);
-    render();
   }catch(e){
     console.warn('save failed, will retry:',e);
     showSyncStatus('⚠ שמור מקומי · מנסה שוב...');
@@ -965,11 +901,6 @@ async function load(){
     });
     let _pollsMigrated=false;
     polls.forEach(p=>{if(_migratePoll(p))_pollsMigrated=true;});
-    // This freshly loaded (and now migrated) state IS what's in Firestore
-    // as far as this device knows — baseline it before the migration
-    // save() below, so that save()'s own freshness check has an accurate
-    // "what did I last know to match remote" to compare against.
-    _captureSyncBaseline();
     if(_savAmtMigrated||_kidsMigrated||_bdaysCleared||_treeMigrated||_pollsMigrated)save();
     render();setTimeout(handleHash,100);
     if(!_isAdminPage()){
@@ -3379,10 +3310,6 @@ async function startRealtimeSync(){
           ()=>{nxtTreePerson=familyTree.length?Math.max(...familyTree.map(p=>p.id))+1:1;})||changed;
         changed=_adoptIfChanged(d.treeScores||{},()=>treeScores,v=>treeScores=v)||changed;
         if((d.adminPass||'')!==adminPass){adminPass=d.adminPass||'';}
-        // Whatever we just adopted (or already matched) now matches
-        // Firestore as far as this device knows — refresh the baseline
-        // save()'s own pre-write freshness check compares against.
-        _captureSyncBaseline();
         if(changed)render();
       }
       _initialSync=false;
