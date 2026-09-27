@@ -825,7 +825,11 @@ async function save(){
     showSyncStatus('✓ נשמר',2000);
   }catch(e){
     console.warn('save failed, will retry:',e);
-    showSyncStatus('⚠ שמור מקומי · מנסה שוב...');
+    // The generic "שמור מקומי" text alone gave no way to tell WHY a save
+    // keeps failing without opening devtools (which most people using this
+    // app never will) — show the actual error code/message on screen too,
+    // long enough to actually read, so it can be reported back verbatim.
+    showSyncStatus('⚠ שמירה נכשלה: '+(e?.code||e?.message||'שגיאה לא ידועה')+' · מנסה שוב',15000);
     _retryTimer=setTimeout(()=>{_saving=false;save();},8000);
     return;
   }
@@ -960,7 +964,7 @@ function showSyncStatus(msg,hideAfter){
   if(!el){
     el=document.createElement('div');
     el.id='syncStatus';
-    el.style.cssText='position:fixed;bottom:calc(130px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:#1A1A18;color:#fff;font-size:12px;font-weight:600;padding:6px 16px;border-radius:20px;z-index:500;transition:opacity 0.3s;white-space:nowrap;pointer-events:none';
+    el.style.cssText='position:fixed;bottom:calc(130px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:#1A1A18;color:#fff;font-size:12px;font-weight:600;padding:6px 16px;border-radius:20px;z-index:500;transition:opacity 0.3s;max-width:88vw;white-space:normal;text-align:center;pointer-events:none';
     document.body.appendChild(el);
   }
   el.textContent=msg;
