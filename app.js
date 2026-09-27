@@ -279,9 +279,35 @@ function closePaymentSettingsModal(){
 }
 function openSettingsHubModal(){
   document.getElementById('settingsHubModal').style.display='flex';
+  renderDataSizeCheck();
 }
 function closeSettingsHubModal(){
   document.getElementById('settingsHubModal').style.display='none';
+}
+// Diagnostic only — computes the exact byte size of the single document
+// save() writes everything into (families, events, messages, the works).
+// Firestore rejects any write once a document passes 1MiB, and every
+// unbounded array here (chat messages especially — never pruned, unlike
+// notifications' 200-entry cap) only ever grows, so this is worth being
+// able to check at a glance instead of guessing why saves keep failing.
+function _dataSizeBytes(){
+  const payload={families,events,fund,goalFunds,savingsPot,adminPass,messages,calItems,birthdays,paymentClaims,globalSettled,visits,notifications,polls,countdowns,yahrzeits,familyTree,treeScores};
+  return new Blob([JSON.stringify(payload)]).size;
+}
+function renderDataSizeCheck(){
+  const el=document.getElementById('dataSizeCheck');if(!el)return;
+  const bytes=_dataSizeBytes();
+  const kb=Math.round(bytes/1024);
+  const limitKb=1024;
+  const pct=Math.min(100,Math.round(bytes/(limitKb*1024)*100));
+  const danger=pct>=85;
+  el.innerHTML=`<div style="font-size:12px;color:var(--text2);margin-bottom:8px;line-height:1.5">גודל כל הנתונים המשותפים (משפחות, אירועים, צ'אט, קופות...) — פיירסטור לא מאפשר יותר מ-1MB למסמך בודד. הודעות צ'אט ישנות הן בדרך כלל התורמות הכי גדולות לגודל.</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <span style="font-size:13px;font-weight:700;color:${danger?'var(--red-mid)':'var(--text)'}">${kb.toLocaleString()} KB מתוך ${limitKb.toLocaleString()} KB</span>
+      <span style="font-size:13px;font-weight:700;color:${danger?'var(--red-mid)':'var(--text2)'}">${pct}%</span>
+    </div>
+    <div class="pbar"><div class="pfill ${danger?'full':'part'}" style="width:${pct}%;${danger?'background:var(--red-mid)':''}"></div></div>
+    ${danger?'<div style="font-size:12px;color:var(--red-mid);font-weight:700;margin-top:8px">⚠️ קרוב לגבול — זו כנראה הסיבה ששמירות נכשלות. צריך למחוק הודעות צ\'אט ישנות או לפנות למפתח.</div>':''}`;
 }
 
 // EmailJS settings — read/written via /api/settings/emailjs (Admin SDK,
