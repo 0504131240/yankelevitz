@@ -3671,7 +3671,13 @@ function renderCalEvList(hebDays,bdayByDate,yahrByDate,annivByDate){
       </div>`;
     }
     if(type==='yahrzeit'){
-      const years=item.hebYear?(_currentHebYear()-item.hebYear):null;
+      // hebYNum is the Hebrew year of THIS occurrence (already computed
+      // above from the date being rendered) — using _currentHebYear()
+      // (today's real year) here instead made the "X שנים" count stuck on
+      // today's year even while browsing a different year in the
+      // calendar, unlike the birthday case just above which already got
+      // this right.
+      const years=item.hebYear?(hebYNum-item.hebYear):null;
       // Deliberately open to everyone, not just admins — unlike the
       // anniversary button below, this only ever touches the yahrzeit
       // entry itself (never a whole family's details).
@@ -3686,7 +3692,9 @@ function renderCalEvList(hebDays,bdayByDate,yahrByDate,annivByDate){
       </div>`;
     }
     if(type==='anniversary'){
-      const years=item.hebYear?(_currentHebYear()-item.hebYear):null;
+      // Same fix as the yahrzeit case above — use this occurrence's own
+      // Hebrew year, not today's.
+      const years=item.hebYear?(hebYNum-item.hebYear):null;
       // item.id is the family's own id (see allAnniversaries) — this button
       // opens the FULL family edit sheet, not just the anniversary, so it's
       // admin-or-own-family only, same as everywhere else that link appears.
