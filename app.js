@@ -3167,15 +3167,18 @@ const NOTIF_EMAIL_CATS=[
   {id:'birthday',ico:'🎂',label:'ימי הולדת, יארצייט ויום נישואין'},
   {id:'expense',ico:'💳',label:'הוצאה חדשה'},
   {id:'event',ico:'📅',label:'אירוע חדש או סגירת אירוע'},
-  {id:'deposit',ico:'💰',label:'הפקדה חדשה'},
   {id:'goalFund',ico:'🎯',label:'קופה חדשה למטרה'},
   {id:'siteUpdate',ico:'🆕',label:'עדכון או תכונה חדשה באתר'},
 ];
 // Only these kinds are ever scoped to a specific family (relatedFamIds) —
 // a poll, a birthday, a family-edit or a new goal fund aren't "about" any
-// one family the way an event/expense/deposit is, so there's no sensible
-// "רק שלי" to offer them; they're always broadcast to every opted-in family.
-const NOTIF_EMAIL_SCOPED_CATS=new Set(['expense','event','deposit']);
+// one family the way an event/expense is, so there's no sensible "רק שלי"
+// to offer them; they're always broadcast to every opted-in family.
+// ('deposit' — a personal wallet/goal-fund/event-pot deposit or withdrawal
+// — used to be here too, but isn't a category at all anymore: see
+// _sendCategoryEmails and _hideFromAllBut. Nobody opts into hearing about
+// someone else's money; the family it's about gets their own direct email.)
+const NOTIF_EMAIL_SCOPED_CATS=new Set(['expense','event']);
 // The email-instead-of-push preference is per REGISTERED EMAIL, not per
 // family — a family with two parent emails might have one on push and one
 // on email, or each on a different category set. deviceEmailSlot3 (set in
@@ -4926,7 +4929,7 @@ function payToPot(evId,famId,amt){
   if(!ev.potPayments)ev.potPayments=[];
   ev.potPayments.push({famId,amt:payment});
   const _pf=getFam(famId);
-  addNotif('💰',(_pf?_pf.name.replace('משפחת','').trim():'')+' הפקיד/ה ₪'+payment.toLocaleString()+' לקופת "'+ev.name+'"',undefined,undefined,'deposit',ev.participants);
+  addNotif('💰',(_pf?_pf.name.replace('משפחת','').trim():'')+' הפקיד/ה ₪'+payment.toLocaleString()+' לקופת "'+ev.name+'"',undefined,_hideFromAllBut(ev.participants),'deposit',ev.participants);
   save();render();
   if(ev.closed){const nb=evAdjBalance(ev)[famId]||0;if(nb>=-0.5)_sendCloseEvEmailOne(ev,famId);}
 }
@@ -6349,7 +6352,14 @@ async function doCreate(){
     }
     if(savingsTotal>0)newEv.savingsTotal=savingsTotal;
     events.unshift(newEv);
-    addNotif('📅','נוסף אירוע חדש: "'+newEv.name+'"',undefined,undefined,'event',newEv.participants);
+    // Non-cumulative participants each get their own personalized
+    // "your share is ₪X" email right below — skip them for the broadcast's
+    // EMAIL (they'd otherwise get both), but not the bell entry or push,
+    // which everyone (participant or not) still sees/gets normally.
+    // Cumulative events send no per-family email at all, so their
+    // participants aren't excluded — the broadcast is the only thing that
+    // tells them about it.
+    addNotif('📅','נוסף אירוע חדש: "'+newEv.name+'"',undefined,undefined,'event',newEv.participants,newEv.cumulative?[]:newEv.participants);
     // notify participants only for non-cumulative events (personalized per family)
     (()=>{
       if(newEv.cumulative) return;
@@ -6585,7 +6595,15 @@ function _sendCloseEvEmailOne(ev,fid){
 function archiveEv(evId){
   const ev=events.find(e=>e.id===evId);if(!ev)return;
   ev.open=false;ev.closedOn='היום';
-  addNotif('🔒','האירוע "'+ev.name+'" נסגר',undefined,undefined,'event',ev.participants);
+  // Participants who already got their own personalized "האירוע הסתיים"
+  // summary email (see _sendCloseEvEmailOne, tracked per-device by the
+  // closemail-<evId>-<fid> flag it sets) shouldn't also get this broadcast
+  // by email — but they still see the bell entry and get push, same as
+  // anyone else. A participant who never got that direct email (still
+  // owes money, or just wasn't checked off) isn't excluded — the broadcast
+  // is the only thing that would tell them the event closed.
+  const alreadyEmailed=ev.participants.filter(fid=>!!localStorage.getItem('closemail-'+ev.id+'-'+fid));
+  addNotif('🔒','האירוע "'+ev.name+'" נסגר',undefined,undefined,'event',ev.participants,alreadyEmailed);
   save();render();
   goTab('archive',null);
 }
@@ -6888,12 +6906,33 @@ function renderVisitLog(){
 // this, only real device pushes are. relatedFamIds: which families this is
 // actually about, for the "רק מה שקשור אליי" pref tier — e.g. an event's
 // participants, or an expense's event's participants.
-function addNotif(icon,text,pushTarget,hiddenFromFamIds,kind,relatedFamIds){
+// excludeEmailFamIds: families who are about to get (or already got) a
+// separate, personalized direct email for this exact same action — e.g. a
+// new event's own participants each get a "your share is ₪X" email right
+// after this fires, and a just-closed event's already-settled participants
+// get their own summary email. Skipping the category-broadcast EMAIL for
+// them avoids a duplicate in their inbox, without touching the bell entry
+// or push, which they still see/get normally like anyone else.
+function addNotif(icon,text,pushTarget,hiddenFromFamIds,kind,relatedFamIds,excludeEmailFamIds){
   notifications.unshift({id:nxtNotif++,icon,text,ts:Date.now(),hiddenFrom:hiddenFromFamIds&&hiddenFromFamIds.length?hiddenFromFamIds:undefined});
   if(notifications.length>200)notifications.length=200;
   renderNotifCenterBadge();
-  const emailOptedSlots=_sendCategoryEmails(icon,text,kind,hiddenFromFamIds,relatedFamIds);
+  const emailOptedSlots=_sendCategoryEmails(icon,text,kind,hiddenFromFamIds,relatedFamIds,excludeEmailFamIds);
   _sendPush(icon+' ינקלביץ',text,pushTarget,hiddenFromFamIds,kind,relatedFamIds,emailOptedSlots);
+}
+// A notification that's only ever "about" specific families (a personal
+// wallet/goal-fund deposit or withdrawal) shouldn't reach anyone else at
+// all — not the bell, not push, not email — regardless of what any OTHER
+// family's own notification preferences say; there's no "opt into hearing
+// about someone else's money" setting to offer here, unlike the broadcast-
+// style categories (event/goalFund/poll). Returns a hiddenFrom list
+// covering every family NOT in keepVisibleFor, merged with any pre-existing
+// hide list (e.g. a goal fund's own hiddenFrom).
+function _hideFromAllBut(keepVisibleFor,extraHidden){
+  const keep=new Set(keepVisibleFor||[]);
+  const hidden=new Set(extraHidden||[]);
+  families.forEach(f=>{if(!keep.has(f.id))hidden.add(f.id);});
+  return[...hidden];
 }
 // Each registered email (family+slot) with the 📧 "email instead of push"
 // toggle on (see notifEmailSection in the notifPrefModal) is fully out of
@@ -6908,12 +6947,18 @@ function addNotif(icon,text,pushTarget,hiddenFromFamIds,kind,relatedFamIds){
 // slot can further narrow that to "רק שלי" — only when their family is in
 // this notification's own relatedFamIds — same relatedFamIds the push
 // side's 'mine' tier already filters by.
-function _sendCategoryEmails(icon,text,kind,hiddenFromFamIds,relatedFamIds){
+function _sendCategoryEmails(icon,text,kind,hiddenFromFamIds,relatedFamIds,excludeEmailFamIds){
   // A family editing their own info is admin-only news (see addNotif's
   // pushTarget:'admin' calls) — never emailed out to other families, even
   // for someone who opted into this category back when it was still offered.
-  if(kind==='familyEdit')return[];
+  // 'deposit' (a personal wallet/goal-fund/event-pot deposit or withdrawal)
+  // no longer has a category at all — see NOTIF_EMAIL_CATS — there's simply
+  // no email to send here for it; the family it's actually about already
+  // gets their own direct confirmation email from wherever addNotif was
+  // called, and nobody else needs to hear about someone else's money.
+  if(kind==='familyEdit'||kind==='deposit')return[];
   const hidden=new Set(hiddenFromFamIds||[]);
+  const excludedFromEmail=new Set(excludeEmailFamIds||[]);
   const optedOutSlots=[];
   // The header banner used to repeat the full notification text as its
   // title (same text as the body paragraph right below it) — for a short
@@ -6928,6 +6973,7 @@ function _sendCategoryEmails(icon,text,kind,hiddenFromFamIds,relatedFamIds){
       const pref=f.notifEmailPref[slot];if(!pref)return;
       optedOutSlots.push(f.id+':'+slot);
       if(hidden.has(f.id))return;
+      if(excludedFromEmail.has(f.id))return;
       if(!kind||!pref.cats[kind])return;
       if(NOTIF_EMAIL_SCOPED_CATS.has(kind)&&pref.scopes?.[kind]==='mine'){
         if(!Array.isArray(relatedFamIds)||!relatedFamIds.includes(f.id))return;
@@ -7604,13 +7650,14 @@ function confirmGoalDeposit(){
   }
   g.contributions[_goalDepositFamId]=(g.contributions[_goalDepositFamId]||0)+amt;
   // Same "notify + direct email" pairing confirmDeposit() already uses for
-  // plain wallet deposits — the notification center/bell entry (and any
-  // opted-in "email instead of push" family for the 'deposit' category)
-  // gets the gift's own details baked into the text, on top of the direct
-  // confirmation email sendGoalDepositEmail always sends the depositor.
+  // plain wallet deposits — the bell entry (visible only to this family
+  // and admin, see _hideFromAllBut) gets the gift's own details baked into
+  // the text, while sendGoalDepositEmail below sends the actual email —
+  // 'deposit' isn't an email category at all anymore, so there's no
+  // duplicate to worry about.
   const giftInfo=g.gift?(' — מתנה: '+g.gift+(g.recipient?' עבור '+g.recipient:'')):'';
   const walletNote=_goalDepositFromFund?' (מהארנק)':'';
-  addNotif('🎯',depName+' הפקיד/ה ₪'+Math.round(amt).toLocaleString()+' לקופת "'+g.name+'"'+walletNote+giftInfo,undefined,g.hiddenFrom,'deposit',[_goalDepositFamId]);
+  addNotif('🎯',depName+' הפקיד/ה ₪'+Math.round(amt).toLocaleString()+' לקופת "'+g.name+'"'+walletNote+giftInfo,undefined,_hideFromAllBut([_goalDepositFamId],g.hiddenFrom),'deposit',[_goalDepositFamId]);
   sendGoalDepositEmail(_goalDepositFamId,amt,g,_goalDepositFromFund);
   closeGoalDepositSheet();
   save();render();
@@ -7834,7 +7881,7 @@ function toggleGoalPaid(famId){
     const f=getFam(famId);
     const name=f?f.name.replace('משפחת','').trim():'';
     const giftInfo=g.gift?(' — מתנה: '+g.gift+(g.recipient?' עבור '+g.recipient:'')):'';
-    addNotif('🎯',name+' סומן/ה כמי ששילם/ה עבור "'+g.name+'"'+giftInfo,undefined,g.hiddenFrom,'deposit',[famId]);
+    addNotif('🎯',name+' סומן/ה כמי ששילם/ה עבור "'+g.name+'"'+giftInfo,undefined,_hideFromAllBut([famId],g.hiddenFrom),'deposit',[famId]);
     sendGoalDepositEmail(famId,addedAmt,g,false);
   }
 }
@@ -7884,7 +7931,7 @@ function confirmGoalPayout(){
     date:new Date().toLocaleDateString('he-IL')});
   g.transferred=true;
   g.transferredAmt=amt;
-  addNotif('💰',name+' קיבל/ה ₪'+amt.toLocaleString()+' לארנק מקופת "'+g.name+'"',undefined,g.hiddenFrom,'deposit',[g.boughtBy]);
+  addNotif('💰',name+' קיבל/ה ₪'+amt.toLocaleString()+' לארנק מקופת "'+g.name+'"',undefined,_hideFromAllBut([g.boughtBy],g.hiddenFrom),'deposit',[g.boughtBy]);
   sendGoalPayoutEmail(g.boughtBy,amt,g);
   save();render();
   renderGoalPayModal();
@@ -7920,7 +7967,7 @@ function markGoalContribFromTreasurer(goalId,famId){
   if(!g.treasurerLog)g.treasurerLog=[];
   g.treasurerLog.push({famId,amt:owed,method:'treasurer',date:new Date().toLocaleDateString('he-IL')});
   fund.deficit=(fund.deficit||0)+owed;
-  addNotif('💼',name+' — הגזבר שילם ₪'+owed.toLocaleString()+' עבורה בקופת "'+g.name+'" (מקדמה, טרם הוחזר)',undefined,g.hiddenFrom,'deposit',[famId]);
+  addNotif('💼',name+' — הגזבר שילם ₪'+owed.toLocaleString()+' עבורה בקופת "'+g.name+'" (מקדמה, טרם הוחזר)',undefined,_hideFromAllBut([famId],g.hiddenFrom),'deposit',[famId]);
   save();render();
   renderGoalPayModal();
 }
@@ -8159,7 +8206,7 @@ function confirmDeposit(){
   const _notifyFamId=_depositFamId;
   closeDepositSheet();
   save();render();
-  addNotif(isDeposit?'💰':'💸',name+(isDeposit?' הפקיד/ה ₪':' משך/ה ₪')+amt.toLocaleString()+(isDeposit?' לארנק':' מהארנק'),undefined,undefined,'deposit',[_notifyFamId]);
+  addNotif(isDeposit?'💰':'💸',name+(isDeposit?' הפקיד/ה ₪':' משך/ה ₪')+amt.toLocaleString()+(isDeposit?' לארנק':' מהארנק'),undefined,_hideFromAllBut([_notifyFamId]),'deposit',[_notifyFamId]);
   sendFundUpdateEmail(_notifyFamId,amt,isDeposit?'הפקדה לארנק':'משיכה מהארנק',note);
 }
 
