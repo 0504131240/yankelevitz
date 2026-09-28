@@ -898,9 +898,13 @@ async function save(){
     console.warn('save failed, will retry:',e);
     // The generic "שמור מקומי" text alone gave no way to tell WHY a save
     // keeps failing without opening devtools (which most people using this
-    // app never will) — show the actual error code/message on screen too,
-    // long enough to actually read, so it can be reported back verbatim.
-    showSyncStatus('⚠ שמירה נכשלה: '+(e?.code||e?.message||'שגיאה לא ידועה')+' · מנסה שוב',15000);
+    // app never will) — show the actual error on screen too, long enough
+    // to actually read, so it can be reported back verbatim. e.code alone
+    // (e.g. "invalid-argument") is too vague to act on — Firestore's own
+    // e.message usually names the exact bad field (e.g. "Unsupported field
+    // value: undefined (found in field goalFunds.3.boughtBy...)"), so lead
+    // with that and keep the code as a fallback/prefix.
+    showSyncStatus('⚠ שמירה נכשלה: '+(e?.message||e?.code||'שגיאה לא ידועה')+' · מנסה שוב',20000);
     _retryTimer=setTimeout(()=>{_saving=false;save();},8000);
     return;
   }
@@ -6930,7 +6934,12 @@ function addNotif(icon,text,pushTarget,hiddenFromFamIds,kind,relatedFamIds,exclu
 // hide list (e.g. a goal fund's own hiddenFrom).
 function _hideFromAllBut(keepVisibleFor,extraHidden){
   const keep=new Set(keepVisibleFor||[]);
-  const hidden=new Set(extraHidden||[]);
+  // Filtered defensively — Firestore's setDoc throws outright on an
+  // undefined anywhere in the write, and this list ends up written
+  // straight into notifications[].hiddenFrom, so a stray undefined/null
+  // already sitting in some legacy hiddenFrom array (extraHidden) would
+  // otherwise silently break every future save, not just this one field.
+  const hidden=new Set((extraHidden||[]).filter(id=>id!=null));
   families.forEach(f=>{if(!keep.has(f.id))hidden.add(f.id);});
   return[...hidden];
 }
