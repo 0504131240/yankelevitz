@@ -1720,6 +1720,7 @@ function _treeLayout(people){
     return targets.reduce((s,x)=>s+x,0)/targets.length;
   };
   const pos={};
+  const pathOf=new Map();
   const placeUnitAt=(u,leftX)=>{
     const step=uWidth(u)-TREE_NODE_W;
     u.ids.forEach((id,i)=>{
@@ -1732,6 +1733,35 @@ function _treeLayout(people){
   // KNOWN real positions), then position this row, before moving up.
   for(let l=maxLevel;l>=0;l--){
     const rowClusters=clustersByLevel[l];
+    // Hierarchical "macro path": which side of its single connecting
+    // child's own marriage this unit continues from, chained all the way
+    // down to whatever marriage anchors this whole line of descent. Used
+    // below as the PRIMARY sort key so an entire ancestral block (both
+    // sides of every couple in the chain) stays grouped together at every
+    // level, instead of an unrelated unit from a different branch landing
+    // geometrically between two halves of the same block — bridgingTargetCx
+    // alone only keeps a unit near ITS OWN child, it has no notion of
+    // staying grouped with second-cousins-once-removed on the same side.
+    if(l===maxLevel){
+      rowClusters.forEach(c=>c.members.forEach(u=>pathOf.set(u,[])));
+    } else {
+      rowClusters.forEach(c=>c.members.forEach(u=>{
+        const kids=[...childPersonsOf.get(u)].filter(cid=>pos[cid]);
+        const married=kids.filter(cid=>{
+          const cu=unitOf[cid];
+          if(!cu||cu.ids.length!==2)return false;
+          const other=cu.ids.find(id=>id!==cid);
+          const op=parentUnitOfMember(other);
+          return op!==u&&pos[other];
+        });
+        if(married.length!==1)return;
+        const c0=married[0],cu=unitOf[c0],other=cu.ids.find(id=>id!==c0);
+        const childPath=pathOf.get(cu);
+        if(childPath==null)return;
+        const direction=pos[c0].cx<pos[other].cx?0:1;
+        pathOf.set(u,[...childPath,direction]);
+      }));
+    }
     // Center on the SPAN of children (midpoint of min/max x), not their
     // average — matches the original "parent sits centered over its
     // children" convention: with one child, min===max, so the parent lands
@@ -1776,7 +1806,23 @@ function _treeLayout(people){
       }
       vi=vj;
     }
+    const clusterPath=c=>{
+      for(const u of c.members){ const p=pathOf.get(u); if(p!=null)return p; }
+      return null;
+    };
+    const comparePath=(pa,pb)=>{
+      const len=Math.min(pa.length,pb.length);
+      for(let i=0;i<len;i++){ if(pa[i]!==pb[i])return pa[i]-pb[i]; }
+      return pa.length-pb.length;
+    };
     const ordered=rowClusters.slice().sort((a,b)=>{
+      // The macro path takes priority over the plain local target whenever
+      // BOTH clusters have one — see pathOf above.
+      const pa=clusterPath(a),pb=clusterPath(b);
+      if(pa!=null&&pb!=null){
+        const c=comparePath(pa,pb);
+        if(c!==0)return c;
+      }
       const av=virtual.get(a),bv=virtual.get(b);
       if(av!==bv)return av-bv;
       return clusterRank(a)-clusterRank(b);
