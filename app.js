@@ -1892,46 +1892,26 @@ function _treeLayout(people){
   // above, which makes room for those targets by spreading the row rather
   // than giving up when a neighbour is in the way; it never reorders.
   //
-  // Only units on a single-child line of ancestry get a target. A couple
-  // with several children of its own must stay centred on those children
-  // instead, and siblings must stay spread as a group under their shared
-  // parents rather than each piling onto the same spot — everyone else
-  // simply keeps their current position and is pushed aside only if the
-  // targets above genuinely need the room.
+  // A unit with no parents recorded on either side simply keeps its current
+  // position, and is pushed aside only if a neighbour's target genuinely
+  // needs the room.
   const unitLeftX=u=>Math.min(...u.ids.map(id=>pos[id].x));
   const unitCenterX=u=>{const xs=u.ids.map(id=>pos[id].cx);return (Math.min(...xs)+Math.max(...xs))/2;};
-  const kidUnitsOf=u=>{
-    const ks=new Set();
-    childPersonsOf.get(u).forEach(cid=>{ const ku=unitOf[cid]; if(ku)ks.add(ku); });
-    return ks;
-  };
   for(let l=1;l<=maxLevel;l++){
     const row=units.filter(u=>u.level===l&&u.ids.every(id=>pos[id])).sort((a,b)=>unitLeftX(a)-unitLeftX(b));
     if(!row.length)continue;
     const desired=row.map(u=>{
-      // A unit with at least one married child (the same bridging pull
-      // computed in the bottom-up pass above) takes priority over simply
-      // aligning this ancestor between ITS OWN two parent-in-law sides
-      // below — tracking the actual marriage that bridges two families
-      // matters more than a symmetric "line of ancestry" alignment, and
-      // without this the two passes fight over the same unit whenever an
-      // ancestor has both (its own child's marriage AND its own further-up
-      // ancestry recorded), with this later pass silently winning —
-      // dragging the ancestor away from its own child's actual side,
-      // potentially all the way into a completely unrelated branch, since
-      // each row's shift here also feeds the next row's own calculation.
-      const bt=bridgingTargetCx(u);
-      if(bt!=null)return bt;
+      // Every couple belongs centred between its own two parent-in-law
+      // sides below (the man's parents and the woman's parents) — now that
+      // the bottom-up pass above groups each ancestral block together by
+      // its macro path, this plain symmetric centering no longer needs to
+      // defer to bridgingTargetCx's fan-out pull: that pull was only ever
+      // needed to compensate for blocks landing in the wrong row sequence,
+      // which the macro path now guarantees against directly.
       const links=u.ids.map(id=>({id,pu:parentUnitOfMember(id)}))
         .filter(k=>k.pu&&k.pu!==u&&k.pu.ids.every(id=>pos[id]));
       const parents=[...new Set(links.map(k=>k.pu))];
       if(!parents.length)return unitCenterX(u);
-      // Exactly one child: that's a link in a line of ancestry. Several
-      // children means this couple must stay centred on them instead, and
-      // NO children means a leaf, which belongs to its sibling group's own
-      // layout rather than being pulled out of it.
-      if(kidUnitsOf(u).size!==1)return unitCenterX(u);
-      if(!parents.every(pu=>kidUnitsOf(pu).size<=1))return unitCenterX(u);
       if(parents.length>1){
         const cs=parents.map(unitCenterX);
         return (Math.min(...cs)+Math.max(...cs))/2;
