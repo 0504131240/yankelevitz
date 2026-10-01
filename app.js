@@ -1917,51 +1917,6 @@ function _treeLayout(people){
 
   return {pos,maxLevel,claimedBy};
 }
-// TEMPORARY debug tool — dumps every person's name/gender/parents/spouse
-// and their final computed x-position, grouped by generation and sorted
-// left-to-right, as plain selectable/screenshot-able text. Built to
-// diagnose a real-data family-tree left/right ordering report; remove once
-// that's resolved.
-function openTreeDebugDump(){
-  const _kidsMap=_treeChildrenMap();
-  const _hidden=_treeHiddenIds(_kidsMap);
-  const people=_hidden.size?familyTree.filter(p=>!_hidden.has(p.id)):familyTree;
-  const byId=new Map(people.map(p=>[p.id,p]));
-  const level=_treeComputeLevels(people);
-  const {pos}=_treeLayout(people);
-  const genderIcon=g=>g==='boy'?'♂':g==='girl'?'♀':'?';
-  const nameOf=id=>{const p=byId.get(id);return p?p.name||'(ללא שם)':'?';};
-  const byLevel={};
-  people.forEach(p=>{
-    const l=level[p.id];
-    if(!byLevel[l])byLevel[l]=[];
-    byLevel[l].push(p);
-  });
-  const levels=Object.keys(byLevel).map(Number).sort((a,b)=>a-b);
-  let out='';
-  levels.forEach(l=>{
-    out+=`\n── רמה ${l} ──\n`;
-    const rows=byLevel[l].filter(p=>pos[p.id]).sort((a,b)=>pos[a.id].cx-pos[b.id].cx);
-    rows.forEach(p=>{
-      const parents=(p.parentIds||[]).map(nameOf).join(' + ')||'—';
-      const spouses=(p.spouseIds||[]).map(nameOf).join(', ')||'—';
-      out+=`${genderIcon(p.gender)} ${p.name||'(ללא שם)'} #${p.id}  |  הורים: ${parents}  |  בן/בת זוג: ${spouses}  |  x:${Math.round(pos[p.id].cx)}\n`;
-    });
-  });
-  // Raw JSON, in the array's original order — the readable summary above
-  // resolves names/sorts by position for easy reading, but can't capture
-  // the exact id values or original insertion order, both of which can
-  // affect the layout's own tie-breaking. This is what to paste back for
-  // an exact, byte-for-byte reproduction.
-  out+='\n\n── JSON גולמי (לשחזור מדויק) ──\n'+JSON.stringify(people);
-  const el=document.getElementById('treeDebugDumpText');
-  if(el)el.textContent=out.trim();
-  const modal=document.getElementById('treeDebugDumpModal');
-  if(modal)modal.style.display='flex';
-}
-function closeTreeDebugDump(){
-  const modal=document.getElementById('treeDebugDumpModal');if(modal)modal.style.display='none';
-}
 function renderFamilyTree(){
   const canvas=document.getElementById('treeCanvas');if(!canvas)return;
   // Anyone folded away inside a sub-tree is left out of the layout
