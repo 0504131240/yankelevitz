@@ -5200,6 +5200,7 @@ function _reportYears(){
   events.forEach(ev=>{const y=_extractYear(ev.date);if(y)ys.add(y);});
   (fund.transactions||[]).forEach(t=>{const y=_heILDateYear(t.date);if(y)ys.add(y);});
   (savingsPot.expenses||[]).forEach(e=>{const y=_heILDateYear(e.date);if(y)ys.add(y);});
+  goalFunds.forEach(g=>(g.contribLog||[]).forEach(e=>{const y=_heILDateYear(e.date);if(y)ys.add(y);}));
   const cur=new Date().getFullYear();
   ys.add(cur);
   return [...ys].sort((a,b)=>b-a);
@@ -5262,6 +5263,17 @@ function renderAnnualReport(){
   const fundDeposits=fundTx.filter(t=>t.type==='deposit').reduce((s,t)=>s+t.amount,0);
   const fundPayouts=fundTx.filter(t=>t.type==='payout').reduce((s,t)=>s+t.amount,0);
   const savExpYear=(savingsPot.expenses||[]).filter(e=>_heILDateYear(e.date)===year).reduce((s,e)=>s+e.amt,0);
+  // Goal funds only track a date per contribution from the day this feature
+  // shipped onward (g.contribLog) — older contributions have no date and so
+  // can't be attributed to a specific year; see goalUntracked below.
+  const goalContribThisYear=[];
+  goalFunds.forEach(g=>{
+    const entries=(g.contribLog||[]).filter(e=>_heILDateYear(e.date)===year);
+    if(!entries.length)return;
+    goalContribThisYear.push({g,sum:entries.reduce((s,e)=>s+e.amt,0)});
+  });
+  const goalContribTotal=goalContribThisYear.reduce((s,x)=>s+x.sum,0);
+  const goalUntracked=goalFunds.some(g=>goalTotal(g)>0.5&&(g.contribLog||[]).reduce((s,e)=>s+e.amt,0)<goalTotal(g)-0.5);
   const _famActive=_reportView==='family';
   const toggleHtml=`<div style="display:flex;gap:6px;margin-bottom:14px">
     <button onclick="setReportView('family')" style="flex:1;padding:8px;border-radius:var(--r2);border:1.5px solid ${_famActive?'var(--blue-mid)':'var(--border)'};background:${_famActive?'var(--blue-mid)':'transparent'};color:${_famActive?'#fff':'var(--text2)'};font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">👨‍👩‍👧‍👦 לפי משפחות</button>
@@ -5285,6 +5297,11 @@ function renderAnnualReport(){
         <div style="font-size:11px;color:var(--text2)">💎 הוצא מהחיסכון</div>
         <div style="font-size:22px;font-weight:800">₪${savExpYear.toLocaleString()}</div>
       </div>`:''}
+      ${goalContribThisYear.length?`<div style="background:var(--surface2);border-radius:var(--r2);padding:12px;text-align:center;grid-column:1/-1">
+        <div style="font-size:11px;color:var(--text2)">🎯 קופות מטרה</div>
+        <div style="font-size:22px;font-weight:800">₪${goalContribTotal.toLocaleString()}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">${goalContribThisYear.map(x=>esc(x.g.name)+': ₪'+x.sum.toLocaleString()).join(' · ')}</div>
+      </div>`:''}
     </div>
     ${fundTx.length?`<div style="font-size:12px;color:var(--text2);margin-bottom:14px">🏦 ארנק: הופקדו ₪${fundDeposits.toLocaleString()} · שולמו ₪${fundPayouts.toLocaleString()}</div>`:''}
     ${toggleHtml}
@@ -5296,6 +5313,7 @@ function renderAnnualReport(){
     <div>${evRows}</div>
     `}
     ${undatedCount?`<div style="font-size:11px;color:var(--text3);margin-top:12px">* ${undatedCount} אירועים ללא תאריך שנה מזוהה אינם כלולים בדוח</div>`:''}
+    ${goalUntracked?`<div style="font-size:11px;color:var(--text3);margin-top:6px">* קופות מטרה: מוצגות רק הפקדות מתאריך תחילת המעקב ואילך — הפקדות קודמות לא מיוחסות לשנה מסוימת</div>`:''}
   `;
 }
 function famAva(f, size=34, extra=''){
@@ -7679,6 +7697,8 @@ function confirmGoalDeposit(){
       date:new Date().toLocaleDateString('he-IL')});
   }
   g.contributions[_goalDepositFamId]=(g.contributions[_goalDepositFamId]||0)+amt;
+  if(!g.contribLog)g.contribLog=[];
+  g.contribLog.push({famId:_goalDepositFamId,amt,date:new Date().toLocaleDateString('he-IL')});
   // Same "notify + direct email" pairing confirmDeposit() already uses for
   // plain wallet deposits — the bell entry (visible only to this family
   // and admin, see _hideFromAllBut) gets the gift's own details baked into
@@ -7896,6 +7916,13 @@ function toggleGoalPaid(famId){
   const prevAmt=g.contributions[famId]||0;
   const paid=prevAmt>=perFamily;
   g.contributions[famId]=paid?0:perFamily;
+  if(!paid){
+    const addedAmt0=perFamily-prevAmt;
+    if(addedAmt0>0){
+      if(!g.contribLog)g.contribLog=[];
+      g.contribLog.push({famId,amt:addedAmt0,date:new Date().toLocaleDateString('he-IL')});
+    }
+  }
   save();render();
   renderGoalPayModal();
   if(!paid){
@@ -7991,6 +8018,8 @@ function markGoalContribFromTreasurer(goalId,famId){
   const name=f.name.replace('משפחת','').trim();
   if(!confirm('הגזבר ישלם ₪'+owed.toLocaleString()+' עבור '+name+' בקופת "'+g.name+'"?'))return;
   g.contributions[famId]=(g.contributions[famId]||0)+owed;
+  if(!g.contribLog)g.contribLog=[];
+  g.contribLog.push({famId,amt:owed,date:new Date().toLocaleDateString('he-IL')});
   if(!g.treasurerLog)g.treasurerLog=[];
   g.treasurerLog.push({famId,amt:owed,method:'treasurer',date:new Date().toLocaleDateString('he-IL')});
   fund.deficit=(fund.deficit||0)+owed;
