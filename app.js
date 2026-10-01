@@ -1754,12 +1754,19 @@ function _treeLayout(people){
           const op=parentUnitOfMember(other);
           return op!==u&&pos[other];
         });
-        if(married.length!==1)return;
-        const c0=married[0],cu=unitOf[c0],other=cu.ids.find(id=>id!==c0);
-        const childPath=pathOf.get(cu);
-        if(childPath==null)return;
-        const direction=pos[c0].cx<pos[other].cx?0:1;
-        pathOf.set(u,[...childPath,direction]);
+        if(married.length===1){
+          const c0=married[0],cu=unitOf[c0],other=cu.ids.find(id=>id!==c0);
+          const direction=pos[c0].cx<pos[other].cx?0:1;
+          pathOf.set(u,[...pathOf.get(cu),direction]);
+          return;
+        }
+        // No single line of descent to continue from (no married child, or
+        // several of them forking off in different directions — a parent
+        // of many, like most real ancestors) — this unit becomes a fresh
+        // anchor for whatever sits above IT, exactly like the bottom-most
+        // row's own base case above. It can't itself be ordered by a path
+        // through its many children, but its own parents still deserve one.
+        pathOf.set(u,[]);
       }));
     }
     // Center on the SPAN of children (midpoint of min/max x), not their
@@ -1892,11 +1899,19 @@ function _treeLayout(people){
   // above, which makes room for those targets by spreading the row rather
   // than giving up when a neighbour is in the way; it never reorders.
   //
-  // A unit with no parents recorded on either side simply keeps its current
-  // position, and is pushed aside only if a neighbour's target genuinely
-  // needs the room.
+  // Only units on a single-child line of ancestry get a target. A couple
+  // with several children of its own must stay centred on those children
+  // instead, and siblings must stay spread as a group under their shared
+  // parents rather than each piling onto the same spot — everyone else
+  // simply keeps their current position and is pushed aside only if the
+  // targets above genuinely need the room.
   const unitLeftX=u=>Math.min(...u.ids.map(id=>pos[id].x));
   const unitCenterX=u=>{const xs=u.ids.map(id=>pos[id].cx);return (Math.min(...xs)+Math.max(...xs))/2;};
+  const kidUnitsOf=u=>{
+    const ks=new Set();
+    childPersonsOf.get(u).forEach(cid=>{ const ku=unitOf[cid]; if(ku)ks.add(ku); });
+    return ks;
+  };
   for(let l=1;l<=maxLevel;l++){
     const row=units.filter(u=>u.level===l&&u.ids.every(id=>pos[id])).sort((a,b)=>unitLeftX(a)-unitLeftX(b));
     if(!row.length)continue;
@@ -1907,11 +1922,17 @@ function _treeLayout(people){
       // its macro path, this plain symmetric centering no longer needs to
       // defer to bridgingTargetCx's fan-out pull: that pull was only ever
       // needed to compensate for blocks landing in the wrong row sequence,
-      // which the macro path now guarantees against directly.
+      // which the macro path now guarantees against directly. But a unit
+      // that itself branches (several children of its own, or a shared
+      // parent with several children) must stay put at its bottom-up
+      // position instead — centering it on its own two parent-sides would
+      // drag it away from its own children, who were never moved.
       const links=u.ids.map(id=>({id,pu:parentUnitOfMember(id)}))
         .filter(k=>k.pu&&k.pu!==u&&k.pu.ids.every(id=>pos[id]));
       const parents=[...new Set(links.map(k=>k.pu))];
       if(!parents.length)return unitCenterX(u);
+      if(kidUnitsOf(u).size!==1)return unitCenterX(u);
+      if(!parents.every(pu=>kidUnitsOf(pu).size<=1))return unitCenterX(u);
       if(parents.length>1){
         const cs=parents.map(unitCenterX);
         return (Math.min(...cs)+Math.max(...cs))/2;
