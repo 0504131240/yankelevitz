@@ -1917,6 +1917,39 @@ function _treeLayout(people){
 
   return {pos,maxLevel,claimedBy};
 }
+// TEMPORARY debug tool (v2) — same purpose as before, but the JSON dump
+// now strips photo/birthYear/deathYear/deceased/maidenName/sourceFamId
+// (irrelevant to layout, and the photos' base64 data was big enough to
+// get cut off mid-message last time) down to just {id,name,gender,
+// parentIds,spouseIds} — small enough to copy as plain text instead of
+// needing a screenshot. Remove once the real-data discrepancy is resolved.
+function openTreeDebugDump(){
+  const _kidsMap=_treeChildrenMap();
+  const _hidden=_treeHiddenIds(_kidsMap);
+  const people=_hidden.size?familyTree.filter(p=>!_hidden.has(p.id)):familyTree;
+  const compact=people.map(p=>({id:p.id,name:p.name||'',gender:p.gender||'',parentIds:p.parentIds||[],spouseIds:p.spouseIds||[]}));
+  const el=document.getElementById('treeDebugDumpText');
+  if(el)el.textContent=JSON.stringify(compact);
+  const modal=document.getElementById('treeDebugDumpModal');
+  if(modal)modal.style.display='flex';
+}
+function closeTreeDebugDump(){
+  const modal=document.getElementById('treeDebugDumpModal');if(modal)modal.style.display='none';
+}
+function copyTreeDebugDump(){
+  const el=document.getElementById('treeDebugDumpText');if(!el)return;
+  const text=el.textContent||'';
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>showToast('✓ הועתק'),()=>_fallbackCopyTreeDump(el));
+  } else {
+    _fallbackCopyTreeDump(el);
+  }
+}
+function _fallbackCopyTreeDump(el){
+  const range=document.createRange();range.selectNodeContents(el);
+  const sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);
+  try{document.execCommand('copy');showToast('✓ הועתק');}catch(e){showToast('בחרו את הטקסט ידנית והעתיקו');}
+}
 function renderFamilyTree(){
   const canvas=document.getElementById('treeCanvas');if(!canvas)return;
   // Anyone folded away inside a sub-tree is left out of the layout
