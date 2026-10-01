@@ -7,7 +7,7 @@ const COLORS=[
 let families=[];
 let events=[];
 let nxtId=1,nxtFam=1,actYear='all',expanded=new Set();
-let collapsedEvents=new Set(),expandedArchGoals=new Set();
+let collapsedEvents=new Set();
 let expandedCumFamilies=new Set();
 let expandedPotFamilies=new Set();
 let addExpItemEvId=null,addExpItemFamId=null,addExpItemSharedWith=null,addExpItemSplitMode='equal',_editExpItemId=null,addExpItemFromPot=false,addExpItemPayMode='single',addExpItemMethod='equal';
@@ -1057,7 +1057,7 @@ function showSyncStatus(msg,hideAfter){
 
 function render(){
   applyEditMode();
-  const fns=[renderHome,renderMetrics,renderOpenList,renderArchive,renderFamilies,renderFund,renderGoalFunds,renderFamilyHome,renderClaimsBanner,renderVisitLog,renderNotifCenterBadge,renderPollBanner,renderFamilyTreeIfOpen];
+  const fns=[renderHome,renderMetrics,renderOpenList,renderArchive,renderFamilies,renderFund,renderGoalFunds,renderFamilyHome,renderClaimsBanner,renderVisitLog,renderNotifCenterBadge,renderPollBanner,renderFamilyTreeIfOpen,renderArchiveEvDetailIfOpen];
   fns.forEach(fn=>{try{fn();}catch(e){console.error(fn.name,e);}});
   const debt=calcDebt();
   const open=events.filter(e=>e.open).length;
@@ -5120,19 +5120,12 @@ function renderArchiveGoals(){
   if(!el)return;
   const archived=_visibleGoalFunds(goalFunds.filter(g=>g.archived));
   if(!archived.length){el.innerHTML='';return;}
+  // Clicking the card opens the same rich goalPayModal active funds use
+  // (see openGoalPayModal — it doesn't care whether the fund is archived)
+  // instead of the old inline "▼ פרטים" toggle.
   el.innerHTML=`<div class="sec-ttl" style="margin-top:18px">קופות מטרה בארכיון</div>`+archived.map(g=>{
     const total=goalTotal(g);
-    const isExp=expandedArchGoals.has(g.id);
-    const rows=families.map(f=>{
-      const cl=col(f.id);
-      const c=g.contributions[f.id]||0;
-      return`<div class="amrow">
-        ${famAva(f, 30)}
-        <span style="font-size:13px;font-weight:600;flex:1">${esc(f.name.replace('משפחת','').trim())}</span>
-        <span style="font-size:12px;color:var(--text2)">הפקיד ₪${c.toLocaleString()}</span>
-      </div>`;
-    }).join('');
-    return`<div class="acard">
+    return`<div class="acard" onclick="openGoalPayModal(${g.id})" style="cursor:pointer">
       <div class="acard-head">
         <div style="flex:1">
           <div class="acard-title">🔒 🎯 ${esc(g.name)}</div>
@@ -5140,14 +5133,9 @@ function renderArchiveGoals(){
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
           <span class="total-chip">₪${total.toLocaleString()}</span>
-          <button class="exp-btn" onclick="toggleArchGoalExp(${g.id})">${isExp?'▲ סגור':'▼ פרטים'}</button>
+          <span style="font-size:11px;color:var(--text3)">◂ פרטים</span>
         </div>
       </div>
-      ${isExp?`<div class="acard-body">${rows}
-        <div class="card-actions">
-          <button class="action-btn edit-only" onclick="reopenGoalFund(${g.id})">🔓 פתח מחדש</button>
-          <button class="action-btn red edit-only" onclick="delGoalFund(${g.id})">🗑 מחק</button>
-        </div></div>`:''}
     </div>`;
   }).join('');
 }
@@ -5160,38 +5148,24 @@ function renderArchive(){
   const filtered=actYear==='all'?closed:closed.filter(e=>e.date.includes(actYear));
   if(!filtered.length){document.getElementById('archList').innerHTML=`<div class="empty"><span class="empty-ico">🗂️</span>${closed.length?'אין אירועים לשנה זו':'הארכיון ריק'}</div>`;return;}
   document.getElementById('archList').innerHTML=filtered.map(ev=>{
-    const cost=evCost(ev);const isExp=expanded.has(ev.id);
+    const cost=evCost(ev);
     const excl=families.filter(f=>ev.excluded.includes(f.id));
-    const mems=ev.participants.map(fid=>{
-      const f=getFam(fid);if(!f)return'';const cl=col(fid);
-      const spent=ev.expenses[fid]||0;
-      const b=evBalance(ev)[fid];
-      return`<div class="amrow">
-        ${famAva(f, 30)}
-        <span style="font-size:13px;font-weight:600;flex:1">${esc(f.name.replace('משפחת','').trim())}</span>
-        <span style="font-size:12px;color:var(--text2)">שילם ₪${spent.toLocaleString()}</span>
-        <span class="badge ${b>=0?'badge-green':'badge-amber'}" style="font-size:10px">${b>=0?'קיבל ₪'+b:'החזיר ₪'+Math.abs(b)}</span>
-      </div>`;
-    }).join('');
     const exclLine=excl.length?`<div class="excl">לא השתתפו: ${excl.map(f=>esc(f.name.replace('משפחת','').trim())).join(', ')}</div>`:'';
-    return`<div class="acard">
+    // Clicking the card opens the full evCard breakdown in a popup (see
+    // openArchiveEvDetail) instead of the old inline "▼ פרטים" toggle.
+    return`<div class="acard" id="ecard-${ev.id}" onclick="openArchiveEvDetail(${ev.id})" style="cursor:pointer">
       <div class="acard-head">
         <div style="flex:1">
           <div class="acard-title">🔒 ${esc(ev.name)}</div>
           <div class="acard-meta">${ev.date&&ev.date!=='לא צוין'?esc(ev.date)+' · ':''}${ev.participants.length} משפחות · ${shareLabel(ev)}</div>
           ${ev.closedOn?`<div class="acard-closed">נסגר: ${ev.closedOn}</div>`:''}
+          ${exclLine}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
           <span class="total-chip">₪${cost.toLocaleString()}</span>
-          <button class="exp-btn" onclick="toggleExp(${ev.id})">${isExp?'▲ סגור':'▼ פרטים'}</button>
+          <span style="font-size:11px;color:var(--text3)">◂ פרטים</span>
         </div>
       </div>
-      ${isExp?`<div class="acard-body">${mems}${exclLine}
-        <div class="card-actions">
-          <button class="action-btn edit-only" onclick="editEv(${ev.id})">✏️ ערוך</button>
-          <button class="action-btn edit-only" onclick="reopenEv(${ev.id})">🔓 פתח מחדש</button>
-          <button class="action-btn red edit-only" onclick="delEv(${ev.id})">🗑 מחק</button>
-        </div></div>`:''}
     </div>`;
   }).join('');
 }
@@ -6739,12 +6713,40 @@ function delEv(evId){
   if(!confirm('למחוק את האירוע?'))return;
   events=events.filter(e=>e.id!==evId);expanded.delete(evId);save();render();
 }
-function toggleExp(evId){
-  if(expanded.has(evId)){expanded.delete(evId);history.replaceState(null,'','#archive');}
-  else{expanded.add(evId);history.replaceState(null,'','#archive-'+evId);}
-  renderArchive();
-}
 function setYear(y){actYear=y;renderArchive();}
+// Popup detail for an archived event — reuses evCard() verbatim (the same
+// rich, item-by-item breakdown open events show on the home/payments tab),
+// instead of the old bare-bones inline "▼ פרטים" participant list. Kept in
+// sync via renderArchiveEvDetailIfOpen (called from the main render()
+// loop, same pattern as renderFamilyTreeIfOpen) rather than threading a
+// refresh call through every one of evCard's own action handlers.
+let _archiveEvDetailId=null;
+function openArchiveEvDetail(evId){
+  _archiveEvDetailId=evId;
+  renderArchiveEvDetail();
+  document.getElementById('archiveEvDetailModal').style.display='flex';
+}
+function closeArchiveEvDetail(){
+  document.getElementById('archiveEvDetailModal').style.display='none';
+  _archiveEvDetailId=null;
+}
+function renderArchiveEvDetail(){
+  const ev=events.find(e=>e.id===_archiveEvDetailId);if(!ev)return;
+  const titleEl=document.getElementById('archiveEvDetailTitle');
+  if(titleEl)titleEl.textContent='🔒 '+ev.name;
+  const bodyEl=document.getElementById('archiveEvDetailBody');
+  if(bodyEl)bodyEl.innerHTML=evCard(ev);
+  const actionsEl=document.getElementById('archiveEvDetailActions');
+  if(actionsEl)actionsEl.innerHTML=`
+    <button class="action-btn" style="flex:1" onclick="closeArchiveEvDetail();editEv(${ev.id})">✏️ ערוך</button>
+    <button class="action-btn" style="flex:1" onclick="closeArchiveEvDetail();reopenEv(${ev.id})">🔓 פתח מחדש</button>
+    <button class="action-btn red" style="flex:1" onclick="closeArchiveEvDetail();delEv(${ev.id})">🗑 מחק</button>
+  `;
+}
+function renderArchiveEvDetailIfOpen(){
+  const modal=document.getElementById('archiveEvDetailModal');
+  if(modal&&modal.style.display==='flex')renderArchiveEvDetail();
+}
 function addFam(inputId){
   const inp=document.getElementById(inputId||'famInput');
   let name=inp.value.trim();if(!name)return;
@@ -6796,18 +6798,17 @@ function handleHash(){
     const _hEv=events.find(e=>e.id===id);
     if(_hEv&&!_hEv.open){
       goTab('archive',null,true);
-      expanded.add(id);renderArchive();
+      openArchiveEvDetail(id);
     } else {
       goTab('events',document.getElementById('nb-events'),true);
       collapsedEvents.delete(id);renderOpenList();
+      setTimeout(()=>{const el=document.getElementById('ecard-'+id);if(el)el.scrollIntoView({behavior:'smooth',block:'center'});},150);
     }
-    setTimeout(()=>{const el=document.getElementById('ecard-'+id);if(el)el.scrollIntoView({behavior:'smooth',block:'center'});},150);
   } else if(h.startsWith('archive-')){
     const id=parseInt(h.slice(8));if(isNaN(id))return;
     _enterPayShell();
     goTab('archive',null);
-    expanded.add(id);renderArchive();
-    setTimeout(()=>{const el=document.getElementById('ecard-'+id);if(el)el.scrollIntoView({behavior:'smooth',block:'center'});},150);
+    openArchiveEvDetail(id);
   } else if(h.startsWith('confirm-')){
     const parts=h.slice(8).split('-').map(Number);
     const [evId,famId,amt]=parts;
@@ -7712,13 +7713,10 @@ function archiveGoalFund(goalId){
 }
 function reopenGoalFund(goalId){
   const g=goalFunds.find(x=>x.id===goalId);if(!g)return;
-  g.archived=false;expandedArchGoals.delete(goalId);
+  g.archived=false;
+  if(_goalPayGoalId===goalId)closeGoalPayModal();
   save();render();
   openFundDetail();
-}
-function toggleArchGoalExp(goalId){
-  if(expandedArchGoals.has(goalId))expandedArchGoals.delete(goalId);else expandedArchGoals.add(goalId);
-  renderArchive();
 }
 function renderGoalFunds(){
   const el=document.getElementById('goalFundsList');
@@ -7879,12 +7877,12 @@ function renderGoalPayModal(){
   // only renders once this specific fund's modal is open.
   const menuEl=document.getElementById('goalPayMenu');
   if(menuEl){
-    menuEl.innerHTML=(!g.closed?`<button onclick="openGoalDepositSheet(${g.id})" style="width:100%;padding:11px;border-radius:var(--r2);border:none;background:var(--blue-mid);color:#fff;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer;margin-bottom:8px">↓ הפקדה</button>`:'')+
+    menuEl.innerHTML=(!g.closed&&!g.archived?`<button onclick="openGoalDepositSheet(${g.id})" style="width:100%;padding:11px;border-radius:var(--r2);border:none;background:var(--blue-mid);color:#fff;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer;margin-bottom:8px">↓ הפקדה</button>`:'')+
       boughtSection+
       `<div class="card-actions" style="margin:0">
         <button class="action-btn" onclick="openGoalPayersModal(${g.id})">👥 השתתפות</button>
-        <button class="action-btn" onclick="toggleGoalClosed(${g.id})">${g.closed?'↩️ פתח מחדש':'✓ סגור קופה'}</button>
-        <button class="action-btn blue" onclick="archiveGoalFund(${g.id})">🗂 לארכיון</button>
+        ${g.archived?'':`<button class="action-btn" onclick="toggleGoalClosed(${g.id})">${g.closed?'↩️ פתח מחדש':'✓ סגור קופה'}</button>`}
+        ${g.archived?`<button class="action-btn blue" onclick="reopenGoalFund(${g.id})">↩️ פתח מחדש מארכיון</button>`:`<button class="action-btn blue" onclick="archiveGoalFund(${g.id})">🗂 לארכיון</button>`}
         <button class="action-btn red" onclick="delGoalFund(${g.id})">🗑 מחק</button>
       </div>`;
   }

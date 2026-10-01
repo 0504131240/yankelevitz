@@ -1208,6 +1208,17 @@
   </div>
 </div>
 
+<div id="archiveEvDetailModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1700;align-items:center;justify-content:center;padding:20px;box-sizing:border-box" onclick="if(event.target===this)closeArchiveEvDetail()">
+  <div style="background:var(--surface);border-radius:var(--r);border:1px solid var(--border);padding:0;width:100%;max-width:480px;max-height:88vh;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:16px 18px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:space-between">
+      <span id="archiveEvDetailTitle" style="font-size:15px;font-weight:800;color:var(--text)">🔒 אירוע</span>
+      <button onclick="closeArchiveEvDetail()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text2);line-height:1;padding:0">✕</button>
+    </div>
+    <div id="archiveEvDetailBody" style="padding:14px 18px;overflow-y:auto;flex:1;min-height:0"></div>
+    <div id="archiveEvDetailActions" class="edit-only" style="padding:12px 18px;border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:8px"></div>
+  </div>
+</div>
+
 <!-- Goal fund "who paid" checklist — kept outside fundDetailOverlay (which
      is display:none unless the funds page is open) so it can be opened
      directly from the payments home page too. -->
