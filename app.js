@@ -1932,9 +1932,15 @@ function openTreeDebugDump(){
     rows.forEach(p=>{
       const parents=(p.parentIds||[]).map(nameOf).join(' + ')||'—';
       const spouses=(p.spouseIds||[]).map(nameOf).join(', ')||'—';
-      out+=`${genderIcon(p.gender)} ${p.name||'(ללא שם)'}  |  הורים: ${parents}  |  בן/בת זוג: ${spouses}  |  x:${Math.round(pos[p.id].cx)}\n`;
+      out+=`${genderIcon(p.gender)} ${p.name||'(ללא שם)'} #${p.id}  |  הורים: ${parents}  |  בן/בת זוג: ${spouses}  |  x:${Math.round(pos[p.id].cx)}\n`;
     });
   });
+  // Raw JSON, in the array's original order — the readable summary above
+  // resolves names/sorts by position for easy reading, but can't capture
+  // the exact id values or original insertion order, both of which can
+  // affect the layout's own tie-breaking. This is what to paste back for
+  // an exact, byte-for-byte reproduction.
+  out+='\n\n── JSON גולמי (לשחזור מדויק) ──\n'+JSON.stringify(people);
   const el=document.getElementById('treeDebugDumpText');
   if(el)el.textContent=out.trim();
   const modal=document.getElementById('treeDebugDumpModal');
