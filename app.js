@@ -1863,6 +1863,19 @@ function _treeLayout(people){
     const row=units.filter(u=>u.level===l&&u.ids.every(id=>pos[id])).sort((a,b)=>unitLeftX(a)-unitLeftX(b));
     if(!row.length)continue;
     const desired=row.map(u=>{
+      // A unit with at least one married child (the same bridging pull
+      // computed in the bottom-up pass above) takes priority over simply
+      // aligning this ancestor between ITS OWN two parent-in-law sides
+      // below — tracking the actual marriage that bridges two families
+      // matters more than a symmetric "line of ancestry" alignment, and
+      // without this the two passes fight over the same unit whenever an
+      // ancestor has both (its own child's marriage AND its own further-up
+      // ancestry recorded), with this later pass silently winning —
+      // dragging the ancestor away from its own child's actual side,
+      // potentially all the way into a completely unrelated branch, since
+      // each row's shift here also feeds the next row's own calculation.
+      const bt=bridgingTargetCx(u);
+      if(bt!=null)return bt;
       const links=u.ids.map(id=>({id,pu:parentUnitOfMember(id)}))
         .filter(k=>k.pu&&k.pu!==u&&k.pu.ids.every(id=>pos[id]));
       const parents=[...new Set(links.map(k=>k.pu))];
