@@ -1683,11 +1683,14 @@ function _treeLayout(people){
   });
 
   // A unit's fan-out target: among its own recorded children, the ONE (if
-  // exactly one) who is married to someone with their own separately-
+  // exactly one) who is married — whether or not that spouse has their own
   // recorded parents. That child's own position anchors this ancestor
   // unit's ordering AND X-target — not the whole sibling span — so an
   // ancestor's own parents don't drift to the wrong side just because that
   // ancestor happens to have siblings too, on top of the bridging marriage.
+  // Only an in-law who is themselves a DESCENDANT of this very unit
+  // (op===u — a cousin marriage) is excluded, since that one can't
+  // meaningfully anchor a left/right side.
   const bridgingTargetCx=u=>{
     const kids=[...childPersonsOf.get(u)].filter(cid=>pos[cid]);
     const candidates=kids.filter(cid=>{
@@ -1695,11 +1698,20 @@ function _treeLayout(people){
       if(!cu||cu.ids.length!==2)return false;
       const other=cu.ids.find(id=>id!==cid);
       const op=parentUnitOfMember(other);
-      return op&&op!==u&&pos[other];
+      return op!==u&&pos[other];
     });
     if(candidates.length!==1)return null;
     const c=candidates[0],cu=unitOf[c];
     const other=cu.ids.find(id=>id!==c);
+    const op=parentUnitOfMember(other);
+    // The in-law has no recorded parents of their own (very common — most
+    // real trees don't have every in-law's ancestry on file), so there's no
+    // second recorded family to open a visual gap against. Just track this
+    // child's own already-resolved position directly, ignoring any
+    // unmarried siblings, the same way a true only child would anchor this
+    // ancestor — rather than the fan-out-gap math below, which only makes
+    // sense when there IS a second recorded family to separate from.
+    if(!op)return pos[c].cx;
     const mid=(pos[c].cx+pos[other].cx)/2;
     return pos[c].cx<pos[other].cx
       ?mid-TREE_FANOUT_GAP/2-uWidth(u)/2
