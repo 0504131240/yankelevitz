@@ -397,6 +397,24 @@
   </div>
 </div>
 
+<!-- Family-to-family wallet transfer sheet (openFamTransferSheet) — opened
+     from another family's card in famDetailOverlay above, so it needs a
+     higher z-index to stack on top of it. -->
+<div id="famTransferOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2100;align-items:center;justify-content:center;padding:20px;box-sizing:border-box" onclick="if(event.target===this)closeFamTransferSheet()">
+  <div style="background:var(--surface);border-radius:var(--r);border:1px solid var(--border);padding:16px;width:100%;max-width:360px;max-height:85vh;overflow-y:auto;box-sizing:border-box">
+    <div id="famTransferTitle" style="font-size:14px;font-weight:700;margin-bottom:4px">העברה</div>
+    <div id="famTransferBalLine" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+    <input type="number" min="0" inputmode="numeric" id="famTransferAmt" placeholder="סכום להעברה (₪)"
+      style="width:100%;border:1.5px solid var(--blue-mid);border-radius:var(--r2);padding:12px;font-size:18px;font-family:var(--font);background:var(--bg);color:var(--text);direction:ltr;text-align:center;margin-bottom:10px;box-sizing:border-box">
+    <textarea id="famTransferNote" rows="2" placeholder="הערה (אופציונלי)"
+      style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 12px;font-size:13px;font-family:var(--font);background:var(--bg);color:var(--text);margin-bottom:12px;box-sizing:border-box;resize:vertical"></textarea>
+    <div style="display:flex;gap:8px">
+      <button class="fund-dep-btn" style="flex:1;padding:12px" onclick="confirmFamTransfer()">✓ אשר העברה</button>
+      <button onclick="closeFamTransferSheet()" style="flex:1;padding:12px;border-radius:var(--r2);border:1px solid var(--border);background:transparent;font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer;color:var(--text)">ביטול</button>
+    </div>
+  </div>
+</div>
+
 <nav class="bottom-nav edit-only">
   <button class="nav-btn active" id="nb-home" onclick="goTab('home',this)">
     <span class="nav-in"><span class="nav-icon">🏠</span>בית</span>

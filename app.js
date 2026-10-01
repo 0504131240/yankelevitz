@@ -5626,6 +5626,14 @@ function openFamDetail(famId){
     <span style="font-size:15px;font-weight:800;color:${mainBal>=0?'var(--green-mid)':'var(--red-mid)'}">₪${mainBal.toLocaleString()}</span>
   </div>`;
 
+  // A logged-in family viewing another family's card can send them money
+  // straight from their own wallet balance — not an admin-only tool, see
+  // openFamTransferSheet/confirmFamTransfer.
+  const _myFid=_myFamId();
+  if(_myFid!=null&&_myFid!==famId){
+    html+=`<button onclick="openFamTransferSheet(${famId})" style="width:100%;padding:11px;border-radius:var(--r2);border:none;background:var(--blue-mid);color:#fff;font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer;margin-bottom:14px">💸 העבר כסף מהארנק שלי למשפחה זו</button>`;
+  }
+
   // קופות מטרה
   if(myGoals.length){
     html+=`<div style="margin-bottom:14px">
@@ -8335,6 +8343,68 @@ function confirmDeposit(){
   save();render();
   addNotif(isDeposit?'💰':'💸',name+(isDeposit?' הפקיד/ה ₪':' משך/ה ₪')+amt.toLocaleString()+(isDeposit?' לארנק':' מהארנק'),undefined,_hideFromAllBut([_notifyFamId]),'deposit',[_notifyFamId]);
   sendFundUpdateEmail(_notifyFamId,amt,isDeposit?'הפקדה לארנק':'משיכה מהארנק',note);
+}
+
+// A family (not just admin) sending money straight from their own wallet
+// balance to another family's wallet — opened from that other family's
+// detail card (openFamDetail), never from the admin-only deposit/withdraw
+// sheet above. _myFamId() is always the source; only the destination and
+// amount are picked here.
+let _famTransferToId=null;
+function openFamTransferSheet(toFamId){
+  const fromFid=_myFamId();if(fromFid==null||toFamId===fromFid)return;
+  _famTransferToId=toFamId;
+  const toF=getFam(toFamId);if(!toF)return;
+  const toName=toF.name.replace('משפחת','').trim();
+  const bal=Math.round(fund.famBalances[String(fromFid)]||0);
+  const titleEl=document.getElementById('famTransferTitle');
+  if(titleEl)titleEl.textContent='העברה למשפחת '+toName;
+  const balEl=document.getElementById('famTransferBalLine');
+  if(balEl)balEl.textContent='היתרה שלכם בארנק: ₪'+bal.toLocaleString();
+  const amtInp=document.getElementById('famTransferAmt');if(amtInp)amtInp.value='';
+  const noteInp=document.getElementById('famTransferNote');if(noteInp)noteInp.value='';
+  document.getElementById('famTransferOverlay').style.display='flex';
+}
+function closeFamTransferSheet(){
+  document.getElementById('famTransferOverlay').style.display='none';
+  _famTransferToId=null;
+}
+function confirmFamTransfer(){
+  const fromFid=_myFamId();if(fromFid==null)return;
+  const toFid=_famTransferToId;if(toFid==null||toFid===fromFid)return;
+  const amt=parseFloat(document.getElementById('famTransferAmt')?.value)||0;
+  if(amt<=0){ alert('נא להזין סכום'); return; }
+  const note=(document.getElementById('famTransferNote')?.value||'').trim();
+  const fromKey=String(fromFid),toKey=String(toFid);
+  if(!fund.famBalances) fund.famBalances={};
+  // Re-read the live balance at confirm time, same as confirmGoalDeposit's
+  // wallet-funded branch — never trust whatever was shown when the sheet
+  // opened, in case it's gone stale.
+  const bal=fund.famBalances[fromKey]||0;
+  if(amt>bal){ alert('אין מספיק יתרה בארנק שלכם (₪'+Math.round(bal).toLocaleString()+')'); return; }
+  const fromF=getFam(fromFid),toF=getFam(toFid);if(!fromF||!toF)return;
+  const fromName=fromF.name.replace('משפחת','').trim();
+  const toName=toF.name.replace('משפחת','').trim();
+  fund.famBalances[fromKey]=bal-amt;
+  fund.famBalances[toKey]=(fund.famBalances[toKey]||0)+amt;
+  // Two transaction entries, same "payout from the sender / deposit for the
+  // receiver" pattern markTransferFromFund already uses for an admin-settled
+  // transfer — the only difference here is nothing is attached to a specific
+  // event/debt, this is a free-form wallet-to-wallet transfer.
+  fund.transactions.push({id:nxtTx++,type:'payout',famId:fromFid,amount:amt,
+    desc:'העברה ל'+toName,note:note||null,date:new Date().toLocaleDateString('he-IL')});
+  fund.transactions.push({id:nxtTx++,type:'deposit',famId:toFid,amount:amt,
+    desc:'העברה מ'+fromName,note:note||null,date:new Date().toLocaleDateString('he-IL')});
+  closeFamTransferSheet();
+  closeFamDetail();
+  save();render();
+  // Visible on the bell/push only to the two families involved — admin
+  // always sees everything regardless of hiddenFrom (see _hideFromAllBut/
+  // the admin-device push rule in api/notify.js), same scoping confirmDeposit
+  // already uses for a plain wallet deposit/withdraw.
+  addNotif('🔁',fromName+' העביר/ה ₪'+amt.toLocaleString()+' למשפחת '+toName,undefined,_hideFromAllBut([fromFid,toFid]),'deposit',[fromFid,toFid]);
+  sendFundUpdateEmail(fromFid,amt,'העברה למשפחת '+toName,note);
+  sendFundUpdateEmail(toFid,amt,'העברה ממשפחת '+fromName,note);
 }
 
 
