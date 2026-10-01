@@ -68,6 +68,12 @@ const goalTotal=g=>Object.values(g.contributions||{}).reduce((s,v)=>s+v,0);
 const col=id=>COLORS[(id-1)%COLORS.length];
 const ini=n=>n.replace('משפחת','').trim().slice(0,2);
 const getFam=id=>families.find(f=>f.id===id);
+// Real families in order, each immediately followed by its own sub-families
+// (a kid's spouse+grandkids household, see createKidSubFamily) — used
+// wherever participants are picked, so a sub-family chip always reads as
+// grouped right under the family it grew out of instead of scattered.
+const _famChipOrder=()=>families.filter(f=>!f.subFamily).flatMap(f=>
+  [f,...families.filter(sf=>sf.subFamily&&sf.parentFamilyId===f.id)]);
 const _isAdminPage=()=>/(^|\/)admin\.html$/.test(location.pathname);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const evCost=ev=>(ev.totalCost!=null?ev.totalCost:ev.participants.reduce((s,fid)=>s+(ev.expenses[fid]||0),0))+evPotExpTotal(ev);
@@ -2772,7 +2778,7 @@ function renderFamilyHome(){
   const sub=document.getElementById('fhSub');
   if(sub){
     const openCount=events.filter(e=>e.open).length;
-    const famCount=families.length;
+    const famCount=families.filter(f=>!f.subFamily).length;
     sub.textContent=[famCount?famCount+' משפחות':'',openCount?openCount+' אירועים פעילים':''].filter(Boolean).join(' · ')||'ברוכים הבאים';
   }
   renderMessages();
@@ -3884,7 +3890,11 @@ function _pollVisibleQuestions(p,famId){
 // payment (g.nonPayers) — those still see the fund and its progress
 // normally, they're just left out of the split and the "who paid"/reminder
 // flows, unlike hiddenFrom which hides the fund's existence entirely.
-const _goalPayers=g=>families.filter(f=>!(g.hiddenFrom||[]).includes(f.id)&&!(g.nonPayers||[]).includes(f.id));
+// Sub-families (a kid's own spouse+grandkids household) are excluded from
+// goal-fund participation by default — these funds are usually surprise
+// gifts/pools organized around the real family units, not every nested
+// household within them.
+const _goalPayers=g=>families.filter(f=>!f.subFamily&&!(g.hiddenFrom||[]).includes(f.id)&&!(g.nonPayers||[]).includes(f.id));
 // How much a family still owes toward its equal share of a goal fund (0 if
 // the fund has no target, the family isn't a payer, or it already covered
 // its share) — used to cap the deposit sheet's wallet-transfer suggestion
@@ -4059,7 +4069,7 @@ function closePollHidePicker(){
 }
 function _renderPollHideChips(){
   const el=document.getElementById('pollHideFamChips');if(!el)return;
-  el.innerHTML=families.map(f=>
+  el.innerHTML=families.filter(f=>!f.subFamily).map(f=>
     `<button type="button" class="chip ${_pollHideFamIds.has(f.id)?'on':''}" onclick="togglePollHideFam(${f.id})">${esc(f.name.replace('משפחת','').trim())}</button>`
   ).join('');
 }
@@ -5170,12 +5180,27 @@ function renderArchive(){
   }).join('');
 }
 function renderFamilies(){
-  const html=families.map(f=>{
+  // Sub-families (a kid's own spouse+grandkids household) don't get a
+  // top-level card of their own — that would read as a bogus independent
+  // family — they're nested as a small row inside the real family's card
+  // they grew out of instead (see createKidSubFamily).
+  const html=families.filter(f=>!f.subFamily).map(f=>{
     const cl=col(f.id);const cnt=events.filter(e=>e.participants.includes(f.id)).length;
-    return`<div class="fcard" onclick="openFamDetail(${f.id})" style="cursor:pointer">
-      ${famAva(f, 38)}
-      <div style="flex:1"><div class="fname">${esc(f.name)}</div><div class="fevents">${cnt} אירועים${f.children?' · '+f.children+' ילדים':''}<span class="edit-only">${(()=>{const v=new Set(JSON.parse(localStorage.getItem('verifiedEmails')||'[]'));const hasEmail=f.email||f.email2;const allOk=(f.email?v.has(f.email):true)&&(f.email2?v.has(f.email2):true);return hasEmail?(allOk?' · ✅':'· 📧'):'';})()}</span></div></div>
-      ${(editMode||f.id===_myFamId())?`<button class="action-btn" onclick="event.stopPropagation();openFamEditSheet(${f.id})">✏️ ערוך</button>`:''}
+    const subFams=families.filter(sf=>sf.subFamily&&sf.parentFamilyId===f.id);
+    const subRows=subFams.length?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px">
+      ${subFams.map(sf=>`<div onclick="event.stopPropagation();openFamEditSheet(${sf.id})" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        ${famAva(sf,24)}
+        <span style="font-size:12px;font-weight:600;flex:1">💍 ${esc(sf.name)}</span>
+        <span style="font-size:11px;color:var(--text3)">✏️ ערוך</span>
+      </div>`).join('')}
+    </div>`:'';
+    return`<div class="fcard" onclick="openFamDetail(${f.id})" style="cursor:pointer;flex-direction:column;align-items:stretch">
+      <div style="display:flex;align-items:center;gap:10px">
+        ${famAva(f, 38)}
+        <div style="flex:1"><div class="fname">${esc(f.name)}</div><div class="fevents">${cnt} אירועים${f.children?' · '+f.children+' ילדים':''}<span class="edit-only">${(()=>{const v=new Set(JSON.parse(localStorage.getItem('verifiedEmails')||'[]'));const hasEmail=f.email||f.email2;const allOk=(f.email?v.has(f.email):true)&&(f.email2?v.has(f.email2):true);return hasEmail?(allOk?' · ✅':'· 📧'):'';})()}</span></div></div>
+        ${(editMode||f.id===_myFamId())?`<button class="action-btn" onclick="event.stopPropagation();openFamEditSheet(${f.id})">✏️ ערוך</button>`:''}
+      </div>
+      ${subRows}
     </div>`;
   }).join('');
   // Rendered into both the admin "ניהול משפחות" tab list and the
@@ -5527,9 +5552,21 @@ function renderFamPeopleGrid(){
   const annivHtml=`<div style="display:flex;justify-content:center;margin-bottom:18px">
     ${hasAnniv?circle(2,annivLabel,'💍','openFamAnniversaryPicker()'):circle(2,annivLabel,'+','openFamAnniversaryPicker()',true)}
   </div>`;
+  // Sub-family badge sits as a small circle under each kid's own circle —
+  // 💍 opens that kid's own household (spouse+grandkids, see
+  // createKidSubFamily/openFamEditSheet) if one exists yet, "+" offers to
+  // start one. Not part of the shared circle() helper since it needs its
+  // own (smaller) size and sits in a second row under the kid, not in the
+  // main grid.
   let kidsHtml=(f.kids||[]).map((k,i)=>{
     const icon=k.gender==='boy'?'👦':k.gender==='girl'?'👧':'👶';
-    return circle(i+2,k.name||'ילד/ה',icon,`openPersonModal('kid',${k.id})`);
+    const subBadge=k.spouseFamilyId
+      ?`<div onclick="event.stopPropagation();openFamEditSheet(${k.spouseFamilyId})" title="המשפחה של ${esc(k.name||'')}" style="width:22px;height:22px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;margin-top:-10px">💍</div>`
+      :`<div onclick="event.stopPropagation();createKidSubFamily(${k.id})" title="הוסף בן/בת זוג ל${esc(k.name||'הילד/ה')}" style="width:22px;height:22px;border-radius:50%;background:transparent;border:1px dashed var(--border);color:var(--text3);display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;margin-top:-10px">+</div>`;
+    return`<div style="display:flex;flex-direction:column;align-items:center;gap:5px">
+      ${circle(i+2,k.name||'ילד/ה',icon,`openPersonModal('kid',${k.id})`)}
+      ${subBadge}
+    </div>`;
   }).join('');
   kidsHtml+=circle(0,'הוסף ילד','+',"openPersonModal('kid')",true);
   el.innerHTML=parentsHtml+annivHtml
@@ -5882,6 +5919,8 @@ function deletePerson(){
     if(isP1){if(editMode)f.email='';f.emailName='';delete f.parent1Bday;}else{if(editMode)f.email2='';f.emailName2='';delete f.parent2Bday;}
   }else{
     if(_personKidId==null)return;
+    const k0=(f.kids||[]).find(x=>x.id===_personKidId);
+    if(k0&&k0.spouseFamilyId){alert('יש להסיר קודם את תת-המשפחה של '+(k0.name||'הילד/ה') +' (לחצו על 💍 ליד הילד/ה)');return;}
     if(!confirm('למחוק ילד זה?'))return;
     f.kids=(f.kids||[]).filter(k=>k.id!==_personKidId);
     f.children=f.kids.length;
@@ -5951,7 +5990,10 @@ function saveFamEdit(){
   const f=families.find(x=>x.id===_famEditId);if(!f)return;
   let name=document.getElementById('famEditName').value.trim();
   if(!name){ alert('נא להזין שם'); return; }
-  if(!name.startsWith('משפחת'))name='משפחת '+name;
+  // Sub-families (a kid's own spouse+grandkids household, see
+  // createKidSubFamily) read as a couple's name like "דני ומירי", not a
+  // surname — skip the forced "משפחת " prefix real top-level families get.
+  if(!f.subFamily&&!name.startsWith('משפחת'))name='משפחת '+name;
   f.name=name;
   // ||null, not ||undefined — Firestore's setDoc throws outright on any
   // undefined anywhere in the write, which would silently break every
@@ -5974,9 +6016,33 @@ function delFamFromEdit(){
   if(_famEditId==null)return;
   if(events.some(e=>e.participants.includes(_famEditId))){alert('לא ניתן למחוק משפחה שמשתתפת באירועים');return;}
   if(!confirm('להסיר את המשפחה?'))return;
+  const f=families.find(x=>x.id===_famEditId);
+  if(f&&f.subFamily&&f.parentFamilyId!=null){
+    const pf=families.find(x=>x.id===f.parentFamilyId);
+    const k=pf&&(pf.kids||[]).find(x=>x.id===f.parentKidId);
+    if(k)delete k.spouseFamilyId;
+  }
   families=families.filter(f=>f.id!==_famEditId);
   closeFamEditSheet();
   save();render();
+}
+// Creates a new "sub-family" — the household a kid formed once married,
+// living as a normal families[] entry (subFamily:true) so it gets event
+// participation, wallet balance and the birthday list for free via the
+// same id-generic machinery every real family uses. Opens the existing
+// family-edit sheet immediately so the admin can fill in the spouse's
+// name/photo/wedding date/grandkids using the unchanged p1/p2/anniv/kid
+// flow (parent1 = the married-in kid, parent2 = the spouse).
+function createKidSubFamily(kidId){
+  const f=families.find(x=>x.id===_famEditId);if(!f)return;
+  const k=(f.kids||[]).find(x=>x.id===kidId);if(!k)return;
+  if(k.spouseFamilyId)return;
+  const nid=nxtFam++;
+  families.push({id:nid,subFamily:true,parentFamilyId:f.id,parentKidId:kidId,
+    name:k.name||'משפחה חדשה',emailName:k.name||'',children:0,photo:null});
+  k.spouseFamilyId=nid;
+  save();
+  openFamEditSheet(nid);
 }
 
 // Form
@@ -6147,8 +6213,8 @@ function showForm(){
   document.getElementById('f-name').value='';
   document.getElementById('f-date').value='';
   ['e-name','e-cost','e-fams'].forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.remove('show'); });
-  document.getElementById('famChips').innerHTML=families.map(f=>
-    `<button class="chip on" id="chip-${f.id}" onclick="toggleChip(${f.id})">${esc(f.name.replace('משפחת','').trim())}</button>`
+  document.getElementById('famChips').innerHTML=_famChipOrder().map(f=>
+    `<button class="chip on" id="chip-${f.id}" onclick="toggleChip(${f.id})">${f.subFamily?'└ ':''}${esc(f.name.replace('משפחת','').trim())}</button>`
   ).join('');
   updateFamPickSummary();
   setSplitMethod('equal');
@@ -6169,8 +6235,8 @@ function editEv(evId){
   document.getElementById('f-name').value=ev.name;
   document.getElementById('f-date').value=ev.dateISO||'';
   ['e-name','e-cost','e-fams'].forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.remove('show'); });
-  document.getElementById('famChips').innerHTML=families.map(f=>
-    `<button class="chip ${ev.participants.includes(f.id)?'on':''}" id="chip-${f.id}" onclick="toggleChip(${f.id})">${esc(f.name.replace('משפחת','').trim())}</button>`
+  document.getElementById('famChips').innerHTML=_famChipOrder().map(f=>
+    `<button class="chip ${ev.participants.includes(f.id)?'on':''}" id="chip-${f.id}" onclick="toggleChip(${f.id})">${f.subFamily?'└ ':''}${esc(f.name.replace('משפחת','').trim())}</button>`
   ).join('');
   updateFamPickSummary();
   setSplitMethod(ev.splitMethod||'equal');
@@ -7550,7 +7616,7 @@ function _goalFamPickSet(){
 function _renderGoalFamPickChips(){
   const el=document.getElementById('goalFamPickChips');if(!el)return;
   const set=_goalFamPickSet();
-  el.innerHTML=families.map(f=>
+  el.innerHTML=families.filter(f=>!f.subFamily).map(f=>
     `<button type="button" class="chip ${set.has(f.id)?'on':''}" onclick="toggleGoalFamPick(${f.id})">${esc(f.name.replace('משפחת','').trim())}</button>`
   ).join('');
 }
@@ -7613,7 +7679,7 @@ function openGoalDepositSheet(goalId){
       <span id="goalDepFundText" style="font-size:12px;font-weight:700;color:var(--blue-mid)"></span>
     </div>
     <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">מי מפקיד?</div>
-    ${families.map(f=>{
+    ${families.filter(f=>!f.subFamily).map(f=>{
       const cl=col(f.id);
       const c=g.contributions[f.id]||0;
       return`<div id="gdepfam-${f.id}" onclick="selectGoalDepFam(${f.id})" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--r2);border:1.5px solid var(--border);margin-bottom:6px;cursor:pointer;box-sizing:border-box">
@@ -7880,7 +7946,7 @@ function renderGoalPayModal(){
     :(_goalBoughtPickerOpen&&!g.boughtBy)?
     `<div class="edit-only" style="margin-bottom:8px">
       <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">מי קנה את המתנה?</div>
-      ${families.map(f=>`<div onclick="markGoalBought(${f.id})" style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:var(--r2);border:1.5px solid var(--border);margin-bottom:5px;cursor:pointer;box-sizing:border-box">${famAva(f,28,'flex-shrink:0')}<div style="flex:1;font-size:13px;font-weight:700">${esc(f.name.replace('משפחת','').trim())}</div></div>`).join('')}
+      ${families.filter(f=>!f.subFamily).map(f=>`<div onclick="markGoalBought(${f.id})" style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:var(--r2);border:1.5px solid var(--border);margin-bottom:5px;cursor:pointer;box-sizing:border-box">${famAva(f,28,'flex-shrink:0')}<div style="flex:1;font-size:13px;font-weight:700">${esc(f.name.replace('משפחת','').trim())}</div></div>`).join('')}
       <button onclick="closeGoalBoughtPicker()" style="width:100%;padding:8px;border-radius:var(--r2);border:1px solid var(--border);background:transparent;color:var(--text2);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">ביטול</button>
     </div>`
     :g.boughtBy?
@@ -8066,7 +8132,7 @@ function renderGoalPayersModal(){
   const g=goalFunds.find(x=>x.id===_goalPayersGoalId);if(!g)return;
   const titleEl=document.getElementById('goalPayersTitle');
   if(titleEl)titleEl.textContent='👥 השתתפות בתשלום — '+g.name;
-  const visible=families.filter(f=>!(g.hiddenFrom||[]).includes(f.id));
+  const visible=families.filter(f=>!f.subFamily&&!(g.hiddenFrom||[]).includes(f.id));
   document.getElementById('goalPayersList').innerHTML=visible.map(f=>{
     const excluded=(g.nonPayers||[]).includes(f.id);
     return`<div onclick="toggleGoalNonPayer(${f.id})" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--r2);border:1.5px solid ${excluded?'var(--border)':'var(--green-mid)'};margin-bottom:6px;cursor:pointer;box-sizing:border-box;background:${excluded?'transparent':'var(--green-bg)'}">
