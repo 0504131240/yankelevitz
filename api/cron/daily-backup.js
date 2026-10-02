@@ -17,6 +17,7 @@
 const { getDb, getMessaging, dedupeTokenDocs, notifPrefAllows, isShabbatNow, isYomTovNow, sendViaEmailJS, notifEmailHtml } = require('../_lib/firebaseAdmin');
 const { allOccasions } = require('../_lib/birthdayCalc');
 const { sendWeeklyDebtReminders } = require('./weekly-debt-reminder');
+const { normalizePhone, speakable, flushPhoneQueue } = require('../_lib/yemot');
 
 const BACKUP_RETENTION_DAYS = 30;
 
@@ -47,8 +48,13 @@ async function sendBirthdayReminders(db, data) {
   const ejsSnap = emailSlots.size ? await db.doc('settings/emailjs').get() : null;
   const ejsCreds = ejsSnap?.exists ? ejsSnap.data() : null;
 
+  // Kosher phones that chose birthdays: collected here, called together with
+  // the rest of the morning's calls (see flushPhoneQueue in the handler).
+  const phoneFams = (data.families || []).filter(f => f.phonePref?.cats?.birthday && normalizePhone(f.kosherPhone));
+  const phoneEntries = [];
+
   const tokSnap = await db.collection('fcmTokens').get();
-  if (tokSnap.empty && !emailSlots.size) return { occasions: 0, sent: 0 };
+  if (tokSnap.empty && !emailSlots.size && !phoneFams.length) return { occasions: 0, sent: 0, phoneEntries };
   const tokenDocs = await dedupeTokenDocs(tokSnap.docs);
   const LINKS = {
     admin: 'https://yankeleviz.vercel.app/admin.html',
@@ -84,6 +90,8 @@ async function sendBirthdayReminders(db, data) {
       const body = isYahrzeit ? (i === 0 ? 'היום היארצייט של ' + b.name : 'מחר היארצייט של ' + b.name)
         : isAnniv ? (i === 0 ? 'מזל טוב למשפחת ' + b.name + '!' : 'מחר יום הנישואין של משפחת ' + b.name)
         : (i === 0 ? 'יום הולדת שמח ל' + b.name + '!' : 'מחר יום ההולדת של ' + b.name);
+
+      phoneFams.forEach(f => phoneEntries.push({ phone: normalizePhone(f.kosherPhone), text: speakable(body) }));
 
       for (const [page, allDocs] of Object.entries(groups)) {
         // A family device's own notifPref ('important'/'mine'/'all') only
@@ -133,7 +141,7 @@ async function sendBirthdayReminders(db, data) {
       }
     }
   }
-  return { occasions, sent };
+  return { occasions, sent, phoneEntries };
 }
 
 module.exports = async (req, res) => {
@@ -182,5 +190,15 @@ module.exports = async (req, res) => {
     }
   }
 
-  res.status(200).json({ ok: true, date: today, deletedOld: old.docs.length, reminders, debtReminders });
+  // All of the morning's kosher-phone calls at once: birthdays, the weekly
+  // debt reminder, and anything that came in during last night's quiet hours.
+  let phoneCalls = {};
+  try {
+    phoneCalls = await flushPhoneQueue(db, [...(reminders.phoneEntries || []), ...(debtReminders.phoneEntries || [])]);
+  } catch (e) {
+    console.error('dailyBackup: phone calls failed', e);
+  }
+  delete reminders.phoneEntries; delete debtReminders.phoneEntries;
+
+  res.status(200).json({ ok: true, date: today, deletedOld: old.docs.length, reminders, debtReminders, phoneCalls });
 };

@@ -5,6 +5,7 @@
 // module, exporting the sendable logic instead of its own HTTP handler.
 const { getMessaging, dedupeTokenDocs, escHtml: _escHtml, sendViaEmailJS } = require('../_lib/firebaseAdmin');
 const { evAdjBalance } = require('../_lib/debtCalc');
+const { normalizePhone } = require('../_lib/yemot');
 
 function debtEmailContent(famName, debts, totalDebt, credit) {
   const creditLine = credit > 0.5 ? `\n(מתוכם ₪${credit.toLocaleString()} מקוזזים מזיכוי שיש לך באירוע אחר)` : '';
@@ -39,7 +40,8 @@ function debtEmailContent(famName, debts, totalDebt, credit) {
 async function sendWeeklyDebtReminders(db, data) {
   const ejsSnap = await db.doc('settings/emailjs').get();
   const { publicKey, serviceId, templateId } = ejsSnap.exists ? ejsSnap.data() : {};
-  if (!publicKey || !serviceId || !templateId) return { skipped: 'no emailjs settings' };
+  const emailReady = !!(publicKey && serviceId && templateId);
+  const phoneEntries = [];
 
   const families = data.families || [];
   const openEvents = (data.events || []).filter(e => e.open);
@@ -76,8 +78,13 @@ async function sendWeeklyDebtReminders(db, data) {
     const totalDebt = Math.round(-(netByFam[fid] || 0));
     const credit = Math.max(0, grossDebt - totalDebt);
 
+    const kosherPhone = fam.phonePref?.cats?.debt && normalizePhone(fam.kosherPhone);
+    if (kosherPhone) {
+      phoneEntries.push({ phone: kosherPhone, text: `תזכורת שבועית: למשפחת ${famName} יש חוב פתוח של ${totalDebt} שקלים` });
+    }
+
     const addrs = [fam.email, fam.email2].filter(Boolean);
-    if (addrs.length) {
+    if (addrs.length && emailReady) {
       const { message, html } = debtEmailContent(famName, debts, totalDebt, credit);
       for (const email of addrs) {
         try {
@@ -116,7 +123,7 @@ async function sendWeeklyDebtReminders(db, data) {
     }
   }
 
-  return { emailsSent, pushesSent };
+  return { emailsSent, pushesSent, phoneEntries };
 }
 
 module.exports = { sendWeeklyDebtReminders };

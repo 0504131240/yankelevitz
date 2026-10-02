@@ -7,6 +7,7 @@
 // the app's shared-family data) so random internet traffic can't spam pushes
 // to the family.
 const { getDb, getMessaging, checkAdminPass, dedupeTokenDocs, notifPrefAllows, isShabbatNow, isYomTovNow } = require('./_lib/firebaseAdmin');
+const { yemotConfigured, phoneEntriesFor, callOrQueue } = require('./_lib/yemot');
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
@@ -19,9 +20,21 @@ module.exports = async (req, res) => {
   const db = getDb();
   if (!(await checkAdminPass(db, adminPass))) { res.status(401).json({ error: 'unauthorized' }); return; }
 
+  // Kosher-phone families who chose this kind get a spoken call (or, at
+  // night, one in the morning). Independent of push, so it runs first.
+  let phone = {};
+  if (yemotConfigured() && kind) {
+    try {
+      const snap = await db.doc('appData/familyPayments').get();
+      phone = await callOrQueue(db, phoneEntriesFor(snap.data()?.families, kind, { target, excludeFamIds }, body));
+    } catch (e) {
+      console.error('notify: phone calls failed', e);
+    }
+  }
+
   const tokSnap = await db.collection('fcmTokens').get();
   console.log(`notify: ${tokSnap.size} registered token(s) found`);
-  if (tokSnap.empty) { res.status(200).json({ sent: 0, registered: 0 }); return; }
+  if (tokSnap.empty) { res.status(200).json({ sent: 0, registered: 0, phone }); return; }
   const tokenDocs = await dedupeTokenDocs(tokSnap.docs);
 
   // Devices registered from admin.html should land back on admin.html when
@@ -92,5 +105,5 @@ module.exports = async (req, res) => {
   }
 
   console.log(`notify: sent ${sent}/${registered}, removed ${deleted} invalid token(s)`);
-  res.status(200).json({ sent, registered });
+  res.status(200).json({ sent, registered, phone });
 };

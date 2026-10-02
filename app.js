@@ -3258,6 +3258,10 @@ const NOTIF_EMAIL_CATS=[
   {id:'siteUpdate',ico:'🆕',label:'עדכון או תכונה חדשה באתר'},
   {id:'money',ico:'💰',label:'תנועות כסף בקופות (הפקדות, תשלומים והעברות)',def:false},
 ];
+// Kosher-phone spoken calls (api/_lib/yemot.js): the same kinds as email plus
+// the weekly debt reminder. Few are on by default, since every one rings.
+const PHONE_CATS=[...NOTIF_EMAIL_CATS.map(c=>({...c,def:['birthday','event','goalFund'].includes(c.id)})),{id:'debt',ico:'📋',label:'תזכורת שבועית על חוב פתוח',def:true}];
+const _normPhone=p=>{let d=String(p||'').replace(/\D/g,'');if(d.startsWith('972'))d='0'+d.slice(3);return /^0\d{8,9}$/.test(d)?d:null;};
 // Unset categories fall back to their default: on, except opt-in ones (def:false).
 const _notifEmailCatOn=(pref,id)=>{ const v=pref?.cats?.[id]; if(v!==undefined)return !!v; return (NOTIF_EMAIL_CATS.find(c=>c.id===id)||{}).def!==false; };
 // Only these kinds are ever scoped to a specific family (relatedFamIds) —
@@ -5626,7 +5630,41 @@ function openFamEditSheet(fid){
   if(clearBtn) clearBtn.style.display=f.photo?'inline-block':'none';
   _famAnniversaryPending=undefined;
   renderFamPeopleGrid();
+  _renderFamPhoneSection(f);
   document.getElementById('famEditOverlay').style.display='flex';
+}
+// Built in JS (after the family members block) so index.html and admin.html
+// don't each need the markup.
+function _renderFamPhoneSection(f){
+  const grid=document.getElementById('famPeopleGrid');if(!grid)return;
+  let el=document.getElementById('famPhoneSection');
+  if(!el){
+    el=document.createElement('div');el.id='famPhoneSection';
+    el.style.cssText='padding-top:14px;margin-top:14px;border-top:1px solid var(--border)';
+    grid.parentElement.after(el);
+  }
+  const cats=f.phonePref?.cats||{};
+  const on=c=>cats[c.id]!==undefined?!!cats[c.id]:c.def;
+  el.innerHTML=`<div style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:.3px;margin-bottom:6px">📞 שיחות התראה לטלפון כשר</div>
+    <input type="tel" id="famEditKosherPhone" inputmode="tel" autocomplete="tel" placeholder="מספר טלפון, למשל 0527123456" value="${esc(f.kosherPhone||'')}"
+      style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 12px;font-size:14px;font-family:var(--font);background:var(--bg);color:var(--text);box-sizing:border-box;direction:ltr;text-align:right">
+    <div style="font-size:11px;color:var(--text2);line-height:1.5;margin:6px 0 8px">מה שמסומן למטה יגיע בשיחה מוקראת למספר הזה. אין שיחות בשבת ובחג, ושיחות שנוצרו בלילה (22:00–08:00) מגיעות בבוקר.</div>
+    <div id="famPhoneCats" style="display:flex;flex-direction:column;gap:6px">${PHONE_CATS.map(c=>`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text)"><input type="checkbox" data-cat="${c.id}" ${on(c)?'checked':''}><span>${c.ico} ${c.label}</span></label>`).join('')}</div>
+    ${editMode?`<button type="button" onclick="testKosherPhoneCall()" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">📞 שיחת בדיקה למספר הזה</button><div id="famPhoneTestStatus" style="font-size:12px;margin-top:6px"></div>`:''}`;
+}
+async function testKosherPhoneCall(){
+  const st=document.getElementById('famPhoneTestStatus');
+  const say=(t,c)=>{if(st){st.textContent=t;st.style.color=c||'var(--text2)';}};
+  const phone=_normPhone(document.getElementById('famEditKosherPhone')?.value);
+  if(!phone){say('מספר הטלפון לא תקין','var(--red-mid)');return;}
+  say('מתקשר...');
+  try{
+    const r=await fetch('/api/phone-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminPass,phone})});
+    const d=await r.json();
+    const msgs={'not-configured':'פרטי ימות המשיח עוד לא הוגדרו ב-Vercel','shabbat':'אין שיחות בשבת ובחג','bad-phone':'מספר הטלפון לא תקין'};
+    if(d.ok)say('✓ השיחה יצאה — הטלפון אמור לצלצל עכשיו','var(--green)');
+    else say(msgs[d.error]||('השיחה נכשלה: '+(d.error||r.status)),'var(--red-mid)');
+  }catch(e){say('השיחה נכשלה: '+e.message,'var(--red-mid)');}
 }
 function openFamAnniversaryPicker(){
   const f=families.find(x=>x.id===_famEditId);if(!f)return;
@@ -6109,6 +6147,14 @@ function saveFamEdit(){
   // createKidSubFamily) read as a couple's name like "דני ומירי", not a
   // surname — skip the forced "משפחת " prefix real top-level families get.
   if(!f.subFamily&&!name.startsWith('משפחת'))name='משפחת '+name;
+  const phoneRaw=(document.getElementById('famEditKosherPhone')?.value||'').trim();
+  if(phoneRaw){
+    const phone=_normPhone(phoneRaw);
+    if(!phone){alert('מספר הטלפון הכשר לא תקין');return;}
+    const cats={};
+    document.querySelectorAll('#famPhoneCats input[data-cat]').forEach(i=>{cats[i.dataset.cat]=i.checked;});
+    f.kosherPhone=phone;f.phonePref={cats};
+  }else if(document.getElementById('famEditKosherPhone')){f.kosherPhone=null;f.phonePref=null;}
   f.name=name;
   // ||null, not ||undefined — Firestore's setDoc throws outright on any
   // undefined anywhere in the write, which would silently break every
