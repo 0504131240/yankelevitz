@@ -1274,49 +1274,51 @@ function _syncTreeSubtreeBtn(p){
   btn.textContent=p.collapsed?`🌳 החזר ${n} צאצאים לעץ הראשי`:`🌿 הפוך לתת-עץ (${n} צאצאים)`;
 }
 // Ancestors above someone can also be folded away — symmetric to collapsing
-// descendants below, but with no forking choice to make: going up, both
-// sides of every couple fold together automatically, since a child's own
-// parentIds already lists both parents as a pair. `collapsedUp` is stored
-// on the person (same durable-vs-session split as `collapsed`/_treeExpanded
-// above): the fold itself is saved, while peeking it open again is a local
-// view state that lasts only for this session.
+// descendants below, but there's no "which line to keep" choice: folding
+// up from a person hides their WHOLE side of the family — both parents and
+// everyone further up, plus every other branch off that side (the person's
+// own siblings, aunts/uncles, cousins, and all of THEIR descendants) —
+// leaving only that one person (and their own spouse and descendants,
+// untouched) standing. `collapsedUp` is stored on the person (same
+// durable-vs-session split as `collapsed`/_treeExpanded above): the fold
+// itself is saved, while peeking it open again is a local view state that
+// lasts only for this session.
 let _treeExpandedUp=new Set();
-function _treeAncestorCount(id,byId){
-  byId=byId||new Map(familyTree.map(p=>[p.id,p]));
-  const seen=new Set(),q=[...(byId.get(id)?.parentIds||[])];
+// Walks the WHOLE family blob reachable from someone's parents — up through
+// further ancestors, back down through every other child at each of those
+// generations, and sideways through spouses — without ever stepping back
+// through the starting person themselves (so their own spouse and
+// descendants are never touched; this only ever climbs the OTHER side).
+function _treeFullSideIds(startId,byId,childrenOf){
+  const visited=new Set([startId]);
+  const q=[...(byId.get(startId)?.parentIds||[])];
+  const side=new Set();
   while(q.length){
-    const x=q.pop();
-    if(seen.has(x))continue;
-    seen.add(x);
-    const p=byId.get(x);if(!p)continue;
+    const id=q.pop();
+    if(visited.has(id))continue;
+    visited.add(id);
+    const p=byId.get(id);
+    if(!p)continue;
+    side.add(id);
     (p.parentIds||[]).forEach(pid=>q.push(pid));
+    (childrenOf.get(id)||[]).forEach(cid=>q.push(cid));
+    (p.spouseIds||[]).forEach(sid=>q.push(sid));
   }
-  return seen.size;
+  return side;
+}
+function _treeAncestorCount(id,byId,childrenOf){
+  byId=byId||new Map(familyTree.map(p=>[p.id,p]));
+  childrenOf=childrenOf||_treeChildrenMap();
+  return _treeFullSideIds(id,byId,childrenOf).size;
 }
 function _treeHiddenAncestorIds(){
   const byId=new Map(familyTree.map(p=>[p.id,p]));
-  const hidden=new Set(),q=[];
+  const childrenOf=_treeChildrenMap();
+  const hidden=new Set();
   familyTree.forEach(p=>{
-    if(p.collapsedUp&&!_treeExpandedUp.has(p.id)){
-      (p.parentIds||[]).forEach(pid=>q.push(pid));
-    }
+    if(!p.collapsedUp||_treeExpandedUp.has(p.id))return;
+    _treeFullSideIds(p.id,byId,childrenOf).forEach(id=>hidden.add(id));
   });
-  while(q.length){
-    const id=q.pop();
-    if(hidden.has(id))continue;
-    const p=byId.get(id);
-    if(!p)continue;
-    hidden.add(id);
-    (p.parentIds||[]).forEach(pid=>q.push(pid));
-    // A spouse with no recorded parents of their own (e.g. a hidden
-    // ancestor's second marriage) folds away with them too, same rule as
-    // folding downward — one WITH their own recorded parents belongs to
-    // another documented line and is reached (or not) on its own merits.
-    (p.spouseIds||[]).forEach(sid=>{
-      const s=byId.get(sid);
-      if(s&&!(s.parentIds&&s.parentIds.length))q.push(sid);
-    });
-  }
   return hidden;
 }
 // Opening or closing a folded ancestor line from its card — view only,
@@ -2390,7 +2392,7 @@ function renderFamilyTree(){
     const _open=_treeExpanded.has(p.id);
     const subBtn=(_sub&&!_treeStatsMode)?`<div onclick="event.stopPropagation();toggleTreeSubtree(${p.id})" title="${_open?'סגור את תת-העץ':'פתח את תת-העץ'}" style="position:absolute;left:${pp.cx+13}px;top:${pp.bottom+3}px;height:18px;min-width:18px;padding:0 5px;border-radius:9px;background:${_open?'var(--text2)':'#2a9d8f'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;line-height:1;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.3);z-index:2">${_open?'−':'+'+_sub}</div>`:'';
     // Same badge, mirrored above the card, for a folded line of ancestors.
-    const _supUp=p.collapsedUp?_treeAncestorCount(p.id,_byIdMap):0;
+    const _supUp=p.collapsedUp?_treeAncestorCount(p.id,_byIdMap,_kidsMap):0;
     const _openUp=_treeExpandedUp.has(p.id);
     const upBtn=(_supUp&&!_treeStatsMode)?`<div onclick="event.stopPropagation();toggleTreeAncestorsPeek(${p.id})" title="${_openUp?'סגור את האבות הקדמונים':'פתח את האבות הקדמונים'}" style="position:absolute;left:${pp.cx+13}px;top:${pp.y-21}px;height:18px;min-width:18px;padding:0 5px;border-radius:9px;background:${_openUp?'var(--text2)':'#4a7dbd'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;line-height:1;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.3);z-index:2">${_openUp?'−':'+'+_supUp}</div>`:'';
     // Statistics selection mode: a tap picks/unpicks the card (see
