@@ -1548,7 +1548,8 @@ function openFamilyTreeOverlay(){
   seedFamilyTreeIfEmpty();
   document.getElementById('familyTreeOverlay').style.display='flex';
   // Always open in normal (non-stats) mode with a clean selection.
-  _treeStatsMode=false;_treeSel.clear();
+  _treeStatsMode=false;_treeSel.clear();_treeInfoId=null;
+  const _ip=document.getElementById('treeInfoPanel');if(_ip)_ip.style.display='none';
   const _sp=document.getElementById('treeStatsPanel');if(_sp)_sp.style.display='none';
   const _sb=document.getElementById('treeStatsBtn');if(_sb){_sb.style.background='var(--surface2)';_sb.style.color='var(--text2)';}
   const wrap0=document.getElementById('treeCanvasWrap');
@@ -1972,7 +1973,7 @@ function renderFamilyTree(){
     // a blue ring + ✓ badge, the rest dim so the selection stands out.
     const _sel=_treeStatsMode&&_treeSel.has(p.id);
     const _dim=_treeStatsMode&&!_sel;
-    const selRing=_sel?';box-shadow:0 0 0 3px var(--blue-mid),0 2px 6px rgba(0,0,0,0.08);border-color:var(--blue-mid)':'';
+    const selRing=(_sel||(!_treeStatsMode&&p.id===_treeInfoId))?';box-shadow:0 0 0 3px var(--blue-mid),0 2px 6px rgba(0,0,0,0.08);border-color:var(--blue-mid)':'';
     const selBadge=_sel?`<span style="position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:var(--blue-mid);color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;line-height:1">✓</span>`:'';
     const dragAttrs=_treeStatsMode?'':` draggable="true" ondragstart="treeCardDragStart(event,${p.id})" ondragend="treeCardDragEnd(event)" ondragover="treeCardDragOver(event)" ondragleave="treeCardDragLeave(event)" ondrop="treeCardDrop(event,${p.id})"`;
     return`<div onclick="treeCardClick(${p.id})"${dragAttrs} style="position:absolute;left:${pp.x}px;top:${pp.y}px;width:${TREE_NODE_W}px;height:${TREE_NODE_H}px;background:var(--surface);${borderStyle}${selRing};border-radius:var(--r2);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.08);padding:4px;box-sizing:border-box;text-align:center;gap:1px${_dim?';opacity:0.45':''}">
@@ -1990,6 +1991,8 @@ function renderFamilyTree(){
   canvas.style.height=totalH+'px';
   canvas.innerHTML=`<svg width="${maxX}" height="${totalH}" style="position:absolute;top:0;left:0;pointer-events:none">${svgLines}</svg>${cards}`;
   applyTreeZoom();
+  _treeLastPos=pos;
+  if(_treeInfoId!=null)renderTreeInfoPanel();
 }
 // ── Family-tree statistics ──────────────────────────────────────────────
 // A read-only selection overlay: in stats mode a card tap picks/unpicks the
@@ -2003,6 +2006,7 @@ let _treeLasso=null; // {x0,y0,x1,y1} in unscaled canvas coords while dragging
 function toggleTreeStatsMode(){
   _treeStatsMode=!_treeStatsMode;
   if(!_treeStatsMode){_treeSel.clear();_treeLassoCancel();}
+  else if(_treeInfoId!=null){_treeInfoId=null;const ip=document.getElementById('treeInfoPanel');if(ip)ip.style.display='none';}
   _ensureTreeStatsUI();
   _initTreeLasso();
   const panel=document.getElementById('treeStatsPanel');
@@ -2015,7 +2019,7 @@ function toggleTreeStatsMode(){
 // A card tap: pick/unpick in stats mode (whole branch when that toggle is
 // on), otherwise the normal "open this person" action.
 function treeCardClick(id){
-  if(!_treeStatsMode){openTreePersonModal(id);return;}
+  if(!_treeStatsMode){ if(_treeInfoId===id)closeTreeInfoPanel(); else openTreeInfoPanel(id); return; }
   const ids=_treeSelBranch?[id,..._treeBranchIds(id)]:[id];
   const turnOn=!_treeSel.has(id);
   ids.forEach(x=>{ if(turnOn)_treeSel.add(x); else _treeSel.delete(x); });
@@ -2301,6 +2305,102 @@ function closeTreePersonModal(){
   document.getElementById('treePersonModal').style.display='none';
   _treeActivePersonId=null;
   _treePersonSnapshot=null;
+  if(_treeInfoId!=null)renderTreeInfoPanel();
+}
+// Tapping a person opens this info panel: who they are and their close
+// family as chips that jump to that relative. "✏️ עריכה" opens the full
+// person sheet (details, linking, hiding the line above/below). Built in JS
+// so index.html and admin.html don't need to carry the markup. Desktop:
+// floats over the tree's top-left corner; phone: a bottom sheet.
+let _treeInfoId=null,_treeLastPos=null;
+function _ensureTreeInfoPanel(){
+  const overlay=document.getElementById('familyTreeOverlay');if(!overlay)return null;
+  let el=document.getElementById('treeInfoPanel');
+  if(el)return el;
+  el=document.createElement('aside');
+  el.id='treeInfoPanel';
+  el.setAttribute('aria-live','polite');
+  el.style.cssText='display:none;position:absolute;left:16px;top:72px;width:300px;max-width:calc(100% - 32px);max-height:calc(100% - 150px);overflow-y:auto;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,0.22);z-index:5;direction:rtl;box-sizing:border-box';
+  overlay.appendChild(el);
+  if(!document.getElementById('treeInfoPanelCss')){
+    const s=document.createElement('style');s.id='treeInfoPanelCss';
+    s.textContent='@media (max-width:640px){#treeInfoPanel{left:0!important;right:0!important;top:auto!important;bottom:0!important;width:auto!important;max-width:none!important;max-height:55%!important;border-radius:16px 16px 0 0!important;border-width:1px 0 0!important;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))!important}}'
+      +'.tree-info-chip{padding:5px 10px;border:1px solid var(--border);border-radius:16px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px;font-family:var(--font)}'
+      +'.tree-info-chip:hover{border-color:var(--blue-mid);color:var(--blue-mid)}';
+    document.head.appendChild(s);
+  }
+  // Tapping empty canvas or pressing Escape closes it.
+  const wrap=document.getElementById('treeCanvasWrap');
+  if(wrap)wrap.addEventListener('click',e=>{
+    const t=e.target;
+    if(_treeInfoId!=null&&!_treeStatsMode&&(t===wrap||t.id==='treeCanvas'||t.tagName==='svg'||t.tagName==='line'))closeTreeInfoPanel();
+  });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&_treeInfoId!=null&&document.getElementById('treePersonModal').style.display!=='flex')closeTreeInfoPanel(); });
+  return el;
+}
+function openTreeInfoPanel(id){
+  _treeInfoId=id;
+  renderFamilyTree();
+}
+function closeTreeInfoPanel(){
+  if(_treeInfoId==null)return;
+  _treeInfoId=null;
+  const el=document.getElementById('treeInfoPanel');if(el)el.style.display='none';
+  renderFamilyTreeIfOpen();
+}
+function _hebOrdinal(n){
+  const H=['א','ב','ג','ד','ה','ו','ז','ח','ט','י','יא','יב','יג','יד','טו','טז','יז','יח','יט','כ'][n-1];
+  if(!H)return String(n);
+  return H.length===1?H+'׳':H[0]+'״'+H.slice(1);
+}
+// Jump to a relative from the panel: show their info and scroll them into
+// view if they're drawn.
+function treeInfoGo(id){
+  openTreeInfoPanel(id);
+  const q=_treeLastPos&&_treeLastPos[id],wrap=document.getElementById('treeCanvasWrap');
+  if(!q||!wrap)return;
+  const pad=24;
+  wrap.scrollTo({left:pad+q.cx*_treeZoom-wrap.clientWidth/2,top:pad+q.cy*_treeZoom-wrap.clientHeight/2,behavior:'smooth'});
+}
+function renderTreeInfoPanel(){
+  const el=_ensureTreeInfoPanel();if(!el)return;
+  const p=_treeInfoId!=null?familyTree.find(x=>x.id===_treeInfoId):null;
+  if(!p){_treeInfoId=null;el.style.display='none';return;}
+  const byId=new Map(familyTree.map(x=>[x.id,x]));
+  const has=i=>byId.has(i);
+  const childrenOf=id=>familyTree.filter(x=>(x.parentIds||[]).includes(id)).map(x=>x.id);
+  const parents=(p.parentIds||[]).filter(has);
+  const kids=childrenOf(p.id);
+  // Spouses, plus anyone they had children with but never linked as a spouse.
+  const spouses=new Set((p.spouseIds||[]).filter(has));
+  kids.forEach(k=>(byId.get(k).parentIds||[]).forEach(o=>{ if(o!==p.id&&has(o))spouses.add(o); }));
+  const sibs=new Set();parents.forEach(a=>childrenOf(a).forEach(x=>{ if(x!==p.id)sibs.add(x); }));
+  const gk=new Set();kids.forEach(k=>childrenOf(k).forEach(x=>gk.add(x)));
+  const f=p.gender==='girl',m=p.gender==='boy';
+  const ring=m?'#2a9d8f':f?'#e56399':'var(--text2)',tint=m?'#e8f4f3':f?'#fbe9f0':'var(--surface2)';
+  const full=x=>((x.name||'ללא שם')+(x.surname?' '+x.surname:'')).trim();
+  const initial=((p.name||'').replace(/מוה"ר|מוה״ר|הרב|ר'|ר׳/g,'').match(/[א-תA-Za-z]/)||['?'])[0];
+  const by=(p.birthYear||'').trim(),dy=(p.deathYear||'').trim();
+  const zl=p.deceased&&!/זצ|ז"ל|ז״ל|ע"ה|ע״ה/.test(p.name||'')?'ז״ל':'';
+  const yrs=by&&dy?by+'–'+dy:by?(f?'נולדה ':'נולד ')+by:dy?(f?'נפטרה ':'נפטר ')+dy:'';
+  const q=_treeLastPos&&_treeLastPos[p.id];
+  const gen=q?'דור '+_hebOrdinal(Math.round(q.y/TREE_LEVEL_H)+1)+' באילן':'';
+  const sub=[f&&p.maidenName?'לבית '+esc(p.maidenName):'',esc([yrs,zl].filter(Boolean).join(' · ')),gen].filter(Boolean).join(' · ');
+  const chips=ids=>`<div style="display:flex;flex-wrap:wrap;gap:6px">${ids.map(i=>`<button type="button" class="tree-info-chip" onclick="treeInfoGo(${i})">${esc(full(byId.get(i)))}</button>`).join('')}</div>`;
+  const sec=(t,ids)=>ids.length?`<div style="margin:14px 0 6px;font-size:12px;font-weight:700;color:var(--text2)">${t}</div>${chips(ids)}`:'';
+  el.innerHTML=`<button type="button" onclick="closeTreeInfoPanel()" aria-label="סגירה" style="position:absolute;left:8px;top:8px;width:32px;height:32px;border:0;border-radius:8px;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--text2)">×</button>`
+    +`<div style="display:flex;gap:12px;align-items:center;padding-inline-end:28px">`
+    +`<span style="width:72px;height:72px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:${tint};color:${ring};font-size:32px;font-weight:700;box-shadow:0 0 0 2px ${ring}">${p.photo?`<img src="${p.photo}" alt="" style="width:100%;height:100%;object-fit:cover">`:esc(initial)}</span>`
+    +`<div style="min-width:0"><div style="font-size:20px;font-weight:800;line-height:1.15;color:var(--text);overflow-wrap:anywhere">${esc(full(p))}${p.deceased?' 🕯️':''}</div>`
+    +(sub?`<div style="margin-top:3px;font-size:13px;color:var(--text2)">${sub}</div>`:'')+`</div></div>`
+    +sec('הורים',parents)
+    +sec(f?'בן זוג':'בת זוג',[...spouses])
+    +sec('אחים ואחיות · '+sibs.size,[...sibs])
+    +sec('ילדים · '+kids.length,kids)
+    +sec('נכדים · '+gk.size,[...gk])
+    +`<button type="button" onclick="openTreePersonModal(${p.id})" style="width:100%;margin-top:16px;padding:10px;border-radius:var(--r2);border:none;background:var(--blue-mid);color:#fff;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer">✏️ עריכה</button>`
+    +`<div style="margin-top:6px;font-size:11px;color:var(--text3);text-align:center">פרטים, קישור לאדם אחר, הסתרת השושלת למעלה או למטה</div>`;
+  el.style.display='block';
 }
 function setTreePersonGender(g){
   const p=familyTree.find(x=>x.id===_treeActivePersonId);if(!p)return;
