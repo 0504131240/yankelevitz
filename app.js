@@ -1740,7 +1740,7 @@ function _treePlaceRow(items,widthOf,gapAfterOf,desiredCenterOf){
   return y.map((yi,i)=>yi+off[i]);
 }
 // Two people belong in the same connected component if there's any chain
-// of parent/spouse links between them — parentIds only records the
+// of parent/child/spouse links between them — parentIds only records the
 // child→parent direction, so the reverse (parent→child) is built here too.
 function _treeConnectedComponents(people){
   const byId=new Map(people.map(p=>[p.id,p]));
@@ -1778,7 +1778,10 @@ function _treeConnectedComponents(people){
 // freely interleave two families that have nothing to do with each other.
 // So each connected component gets its OWN independent layout pass, and the
 // results are placed side by side, left to right in the order each
-// component's first member appears in `people`.
+// component's first member appears in `people`. A family that's connected
+// to the rest of the tree ONLY through one marriage (not fully
+// disconnected, just thinly connected) is a different, subtler case —
+// handled inside _treeLayoutComponent itself, see _freshAnchorSeq there.
 function _treeLayout(people){
   const components=_treeConnectedComponents(people);
   if(components.length<=1)return _treeLayoutComponent(people);
@@ -2016,6 +2019,17 @@ function _treeLayoutComponent(people){
   };
   const pos={};
   const pathOf=new Map();
+  // Each fresh anchor (see below) gets tagged with its own unique negative
+  // number instead of sharing a bare `[]` with every other fresh anchor.
+  // Without this, two completely unrelated prolific ancestors elsewhere in
+  // the tree (each with several married children of their own, so each
+  // becomes its own fresh anchor) would both carry the identical empty
+  // path — making everything built on top of EITHER of them compare as
+  // "equal" by path and fall through to the structural fallback order,
+  // which has no notion that they're separate lineages and happily
+  // interleaves them. A unique id keeps every fresh anchor's own upward
+  // lineage grouped as one block, distinguishable from any other anchor's.
+  let _freshAnchorSeq=0;
   const placeUnitAt=(u,leftX)=>{
     const step=uWidth(u)-TREE_NODE_W;
     u.ids.forEach((id,i)=>{
@@ -2058,10 +2072,12 @@ function _treeLayoutComponent(people){
         // No single line of descent to continue from (no married child, or
         // several of them forking off in different directions — a parent
         // of many, like most real ancestors) — this unit becomes a fresh
-        // anchor for whatever sits above IT, exactly like the bottom-most
-        // row's own base case above. It can't itself be ordered by a path
-        // through its many children, but its own parents still deserve one.
-        pathOf.set(u,[]);
+        // anchor for whatever sits above IT, similar to the bottom-most
+        // row's own base case above, but tagged with its own unique id (see
+        // _freshAnchorSeq) rather than sharing a bare `[]` with every other
+        // fresh anchor. It can't itself be ordered by a path through its
+        // many children, but its own parents still deserve one.
+        pathOf.set(u,[-(++_freshAnchorSeq)]);
       }));
     }
     // Center on the SPAN of children (midpoint of min/max x), not their
