@@ -1119,6 +1119,12 @@ const TREE_NODE_W=112,TREE_NODE_H=80,TREE_H_GAP=40,TREE_COUPLE_GAP=14,TREE_LEVEL
 // rather than one block — this is the ONLY place spacing is widened;
 // spouses, siblings and everyone else keep the standard gaps.
 const TREE_FANOUT_GAP=120;
+// Gap between two entirely unrelated trees sharing the same canvas — e.g.
+// after importing a file or pulling from families whose own ancestry has
+// nothing to do with anyone already here. Wider than TREE_FANOUT_GAP so a
+// totally separate family reads as its own clearly separate block, never
+// as a continuation of the one next to it.
+const TREE_COMPONENT_GAP=200;
 let _treeActivePersonId=null,_treeAddRelation=null,_treeAddGender='';
 // What birthYear/deathYear/photo looked like when the person sheet was
 // opened — compared against the current values in saveTreePersonChanges()
@@ -1731,7 +1737,65 @@ function _treePlaceRow(items,widthOf,gapAfterOf,desiredCenterOf){
   const y=_pava(targets);
   return y.map((yi,i)=>yi+off[i]);
 }
+// Two people belong in the same connected component if there's any chain
+// of parent/spouse links between them — parentIds only records the
+// child→parent direction, so the reverse (parent→child) is built here too.
+function _treeConnectedComponents(people){
+  const byId=new Map(people.map(p=>[p.id,p]));
+  const childrenOf=new Map();
+  people.forEach(p=>(p.parentIds||[]).forEach(pid=>{
+    if(!childrenOf.has(pid))childrenOf.set(pid,[]);
+    childrenOf.get(pid).push(p.id);
+  }));
+  const visited=new Set();
+  const components=[];
+  people.forEach(p=>{
+    if(visited.has(p.id))return;
+    const comp=[];
+    const q=[p.id];
+    visited.add(p.id);
+    while(q.length){
+      const id=q.pop();
+      const person=byId.get(id);
+      if(!person)continue;
+      comp.push(person);
+      const neighbors=[...(person.parentIds||[]),...(person.spouseIds||[]),...(childrenOf.get(id)||[])];
+      neighbors.forEach(nid=>{
+        if(!visited.has(nid)&&byId.has(nid)){visited.add(nid);q.push(nid);}
+      });
+    }
+    components.push(comp);
+  });
+  return components;
+}
+// A tree can now hold several totally unrelated families at once — e.g.
+// after importing a file, or pulling in families whose own ancestry was
+// never connected to anyone already here. Laying all of them out through
+// one shared ordering pass would let the algorithm's ordering and centering
+// (all of which assume everyone traces back to a common ancestor somewhere)
+// freely interleave two families that have nothing to do with each other.
+// So each connected component gets its OWN independent layout pass, and the
+// results are placed side by side, left to right in the order each
+// component's first member appears in `people`.
 function _treeLayout(people){
+  const components=_treeConnectedComponents(people);
+  if(components.length<=1)return _treeLayoutComponent(people);
+  const pos={},claimedBy={};
+  let maxLevel=0,offsetX=0;
+  components.forEach(comp=>{
+    const r=_treeLayoutComponent(comp);
+    if(offsetX>0){
+      Object.values(r.pos).forEach(pp=>{pp.x+=offsetX;pp.cx+=offsetX;});
+    }
+    Object.assign(pos,r.pos);
+    Object.assign(claimedBy,r.claimedBy);
+    maxLevel=Math.max(maxLevel,r.maxLevel);
+    const compMaxX=Object.values(r.pos).reduce((m,pp)=>Math.max(m,pp.x+TREE_NODE_W),0);
+    offsetX=compMaxX+TREE_COMPONENT_GAP;
+  });
+  return {pos,maxLevel,claimedBy};
+}
+function _treeLayoutComponent(people){
   const byId=new Map(people.map(p=>[p.id,p]));
   const level=_treeComputeLevels(people);
   const maxLevel=people.length?Math.max(...people.map(p=>level[p.id])):0;
