@@ -17,7 +17,7 @@
 const { getDb, getMessaging, dedupeTokenDocs, notifPrefAllows, isShabbatNow, isYomTovNow, sendViaEmailJS, notifEmailHtml } = require('../_lib/firebaseAdmin');
 const { allOccasions } = require('../_lib/birthdayCalc');
 const { sendWeeklyDebtReminders } = require('./weekly-debt-reminder');
-const { normalizePhone, speakable, flushPhoneQueue } = require('../_lib/yemot');
+const { familyPhones, speakable, flushPhoneQueue } = require('../_lib/yemot');
 
 const BACKUP_RETENTION_DAYS = 30;
 
@@ -50,11 +50,11 @@ async function sendBirthdayReminders(db, data) {
 
   // Kosher phones that chose birthdays: collected here, called together with
   // the rest of the morning's calls (see flushPhoneQueue in the handler).
-  const phoneFams = (data.families || []).filter(f => f.phonePref?.cats?.birthday && normalizePhone(f.kosherPhone));
+  const birthdayPhones = (data.families || []).flatMap(familyPhones).filter(p => p.cats.birthday).map(p => p.phone);
   const phoneEntries = [];
 
   const tokSnap = await db.collection('fcmTokens').get();
-  if (tokSnap.empty && !emailSlots.size && !phoneFams.length) return { occasions: 0, sent: 0, phoneEntries };
+  if (tokSnap.empty && !emailSlots.size && !birthdayPhones.length) return { occasions: 0, sent: 0, phoneEntries };
   const tokenDocs = await dedupeTokenDocs(tokSnap.docs);
   const LINKS = {
     admin: 'https://yankeleviz.vercel.app/admin.html',
@@ -91,7 +91,7 @@ async function sendBirthdayReminders(db, data) {
         : isAnniv ? (i === 0 ? 'מזל טוב למשפחת ' + b.name + '!' : 'מחר יום הנישואין של משפחת ' + b.name)
         : (i === 0 ? 'יום הולדת שמח ל' + b.name + '!' : 'מחר יום ההולדת של ' + b.name);
 
-      phoneFams.forEach(f => phoneEntries.push({ phone: normalizePhone(f.kosherPhone), text: speakable(body) }));
+      birthdayPhones.forEach(phone => phoneEntries.push({ phone, text: speakable(body) }));
 
       for (const [page, allDocs] of Object.entries(groups)) {
         // A family device's own notifPref ('important'/'mine'/'all') only

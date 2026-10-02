@@ -33,16 +33,32 @@ function normalizePhone(p) {
   return /^0\d{8,9}$/.test(d) ? d : null;
 }
 
-// Families whose kosher-phone preferences include this notification kind.
+// Each parent (slot 1/2, like email/email2) has their own kosher phone and
+// categories in f.kosherPhones. A family-level kosherPhone/phonePref from the
+// first version counts as parent 1's until that parent is saved again.
+function familyPhones(f) {
+  const out = [];
+  const byslot = f.kosherPhones || {};
+  [1, 2].forEach(slot => {
+    const e = byslot[slot] || (slot === 1 && f.kosherPhone ? { phone: f.kosherPhone, cats: f.phonePref?.cats } : null);
+    const phone = e && normalizePhone(e.phone);
+    if (phone) out.push({ phone, cats: e.cats || {} });
+  });
+  return out;
+}
+
+// Every parent phone whose chosen categories include this notification kind.
 function phoneEntriesFor(families, kind, { target, excludeFamIds } = {}, text) {
   if (!kind || target === 'admin') return [];
   const excluded = new Set(excludeFamIds || []);
   const spoken = speakable(text);
   if (!spoken) return [];
-  return (families || [])
-    .filter(f => !excluded.has(f.id) && f.phonePref?.cats?.[kind])
-    .map(f => ({ phone: normalizePhone(f.kosherPhone), text: spoken }))
-    .filter(e => e.phone);
+  const out = [];
+  (families || []).forEach(f => {
+    if (excluded.has(f.id)) return;
+    familyPhones(f).forEach(p => { if (p.cats[kind]) out.push({ phone: p.phone, text: spoken }); });
+  });
+  return out;
 }
 
 // Israel local hour; calls between 22:00 and 08:00 wait for the morning run.
@@ -51,14 +67,17 @@ function isQuietHours() {
   return h >= 22 || h < 8;
 }
 
-// One call per number; several messages for the same number are read in a row.
+// One call per number; several messages for the same number are read in a
+// row, and the same message twice (two parents sharing a phone) only once.
 async function runYemotCalls(entries) {
   if (!yemotConfigured() || !entries.length) return { calls: 0 };
-  const phones = {};
+  const byPhone = {};
   entries.forEach(e => {
-    const prev = phones[e.phone];
-    phones[e.phone] = { text: prev ? prev.text + '. ' + e.text : 'הודעה ממערכת המשפחה. ' + e.text };
+    const list = byPhone[e.phone] || (byPhone[e.phone] = []);
+    if (!list.includes(e.text)) list.push(e.text);
   });
+  const phones = {};
+  Object.entries(byPhone).forEach(([phone, texts]) => { phones[phone] = { text: 'הודעה ממערכת המשפחה. ' + texts.join('. ') }; });
   const params = new URLSearchParams({
     token: process.env.YEMOT_TOKEN,
     templateId: process.env.YEMOT_TEMPLATE_ID,
@@ -96,4 +115,4 @@ async function flushPhoneQueue(db, extraEntries = []) {
   return result;
 }
 
-module.exports = { yemotConfigured, speakable, normalizePhone, phoneEntriesFor, isQuietHours, runYemotCalls, callOrQueue, flushPhoneQueue };
+module.exports = { yemotConfigured, speakable, normalizePhone, familyPhones, phoneEntriesFor, isQuietHours, runYemotCalls, callOrQueue, flushPhoneQueue };
