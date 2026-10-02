@@ -7780,7 +7780,7 @@ function selectGoalDepFam(famId){
   });
   const g=goalFunds.find(x=>x.id===_goalDepositGoalId);
   const owed=g?_goalOwedAmt(g,famId):0;
-  const fundBal=Math.round(famFundBal(famId));
+  const fundBal=Math.round(famFundBal(famId)*100)/100;
   const fundLine=document.getElementById('goalDepFundLine');
   const fundText=document.getElementById('goalDepFundText');
   if(fundLine&&fundText){
@@ -7804,7 +7804,7 @@ function selectGoalDepFam(famId){
 // validates against the live balance either way.
 function useFundForGoalDeposit(){
   if(_goalDepositFamId==null)return;
-  const fundBal=Math.round(famFundBal(_goalDepositFamId));
+  const fundBal=Math.round(famFundBal(_goalDepositFamId)*100)/100;
   if(fundBal<=0)return;
   const g=goalFunds.find(x=>x.id===_goalDepositGoalId);
   const owed=g?_goalOwedAmt(g,_goalDepositFamId):0;
@@ -7822,13 +7822,14 @@ function closeGoalDepositSheet(){
 function confirmGoalDeposit(){
   if(_goalDepositGoalId==null){ return; }
   if(_goalDepositFamId==null){ alert('נא לבחור משפחה'); return; }
-  const amt=parseFloat(document.getElementById('goalDepositAmt')?.value)||0;
+  let amt=parseFloat(document.getElementById('goalDepositAmt')?.value)||0;
   if(amt<=0){ alert('נא להזין סכום'); return; }
   const g=goalFunds.find(x=>x.id===_goalDepositGoalId);if(!g)return;
   const depName=(getFam(_goalDepositFamId)||{}).name?.replace('משפחת','').trim()||'';
   if(_goalDepositFromFund){
     const key=String(_goalDepositFamId);
     const bal=fund.famBalances[key]||0;
+    if(amt>bal&&amt-bal<1)amt=bal; // rounding slack — take exactly what's in the wallet
     if(bal<amt){alert('אין מספיק יתרה בארנק (₪'+Math.round(bal).toLocaleString()+')');return;}
     fund.famBalances[key]=bal-amt;
     fund.transactions.push({id:nxtTx++,type:'payout',famId:_goalDepositFamId,amount:amt,
@@ -9597,7 +9598,7 @@ function selectCumPotFam(famId){
   const owed=Math.round(Math.max(0,-(evAdjBalance(ev)[famId]||0)));
   const amtEl=document.getElementById('cumPotAmt');
   if(amtEl)amtEl.value=owed>0?owed:'';
-  const fundBal=Math.round(famFundBal(famId));
+  const fundBal=Math.round(famFundBal(famId)*100)/100;
   const fundLine=document.getElementById('cumPotFundLine');
   const fundText=document.getElementById('cumPotFundText');
   if(fundLine&&fundText){
@@ -9618,7 +9619,7 @@ function closeCumPot(){
 }
 function useFundForCumPot(){
   if(!cumPotFamId)return;
-  const fundBal=Math.round(famFundBal(cumPotFamId));
+  const fundBal=Math.round(famFundBal(cumPotFamId)*100)/100;
   if(fundBal<=0)return;
   const ev=events.find(e=>e.id===cumPotEvId);
   const owed=ev?Math.round(Math.max(0,-(evAdjBalance(ev)[cumPotFamId]||0))):0;
@@ -9636,13 +9637,16 @@ function doDepositToCumPot(){
   if(errEl)errEl.style.display='none';
   const ev=events.find(e=>e.id===cumPotEvId);if(!ev)return;
   if(!ev.potPayments)ev.potPayments=[];
-  const roundAmt=Math.round(amt);
+  let roundAmt=Math.round(amt);
   const savedFamId=cumPotFamId;
   const savedEvId=cumPotEvId;
   const fromFund=_cumPotFromFund;
   if(fromFund){
     const key=String(savedFamId);
     const bal=fund.famBalances[key]||0;
+    // Rounding a ₪268.5 wallet up to 269 shouldn't make "use the wallet"
+    // fail — anything within a shekel of the balance takes exactly the balance.
+    if(roundAmt>bal&&roundAmt-bal<1)roundAmt=bal;
     if(bal<roundAmt){alert('אין מספיק יתרה בארנק (₪'+Math.round(bal).toLocaleString()+')');return;}
     fund.famBalances[key]=bal-roundAmt;
     const _cumPotFamName=(getFam(savedFamId)||{}).name?.replace('משפחת','').trim()||'';
