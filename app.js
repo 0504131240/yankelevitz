@@ -1113,17 +1113,11 @@ function closeFamiliesHomeOverlay(){
 // anyone (add parents/siblings/spouses/children, rename, delete) since a
 // genealogical tree outgrows what the payments app's family units model.
 const TREE_NODE_W=112,TREE_NODE_H=80,TREE_H_GAP=40,TREE_COUPLE_GAP=14,TREE_LEVEL_H=160;
-// Gap left between the two parent couples that split around a married
-// couple (his parents on one side, hers on the other). Wider than the
-// normal TREE_H_GAP so those two families read as two separate lines
-// rather than one block — this is the ONLY place spacing is widened;
-// spouses, siblings and everyone else keep the standard gaps.
-const TREE_FANOUT_GAP=120;
 // Gap between two entirely unrelated trees sharing the same canvas — e.g.
 // after importing a file or pulling from families whose own ancestry has
-// nothing to do with anyone already here. Wider than TREE_FANOUT_GAP so a
-// totally separate family reads as its own clearly separate block, never
-// as a continuation of the one next to it.
+// nothing to do with anyone already here. Wide enough that a totally
+// separate family reads as its own block, never as a continuation of the
+// one next to it.
 const TREE_COMPONENT_GAP=200;
 let _treeActivePersonId=null,_treeAddRelation=null,_treeAddGender='';
 // What birthYear/deathYear/photo looked like when the person sheet was
@@ -1624,666 +1618,217 @@ function _fitTreeWhenReady(attempts){
   }
   if(attempts<20)setTimeout(()=>_fitTreeWhenReady(attempts+1),50);
 }
-// Assigns each person a generation level via BFS from roots (no parents),
-// then aligns spouses to the same (max) level so a married-in partner sits
-// beside their spouse's generation rather than off on their own.
-function _treeComputeLevels(people){
-  const byId=new Map(people.map(p=>[p.id,p]));
-  const level={};
-  people.forEach(p=>{ if(!(p.parentIds&&p.parentIds.length))level[p.id]=0; });
-  let changed=true,guard=0;
-  while(changed&&guard<200){
-    changed=false;guard++;
-    people.forEach(p=>{
-      if(level[p.id]!=null)return;
-      const pls=(p.parentIds||[]).filter(pid=>byId.has(pid)).map(pid=>level[pid]).filter(l=>l!=null);
-      const validParents=(p.parentIds||[]).filter(pid=>byId.has(pid));
-      if(validParents.length&&pls.length===validParents.length){level[p.id]=Math.max(...pls)+1;changed=true;}
-    });
-  }
-  people.forEach(p=>{ if(level[p.id]==null)level[p.id]=0; }); // orphaned/cyclic refs fallback
-  // A recorded parent must always end up exactly one row above their own
-  // child — no matter how many extra generations are recorded on the
-  // CHILD's SPOUSE's side. The pass above only computes each person's row
-  // from their own blood ancestry in isolation, so this relaxation loop
-  // keeps re-applying three rules together until nothing changes anymore:
-  // (1) spouses always share the same row, (2) a child sits at least one
-  // row below every recorded parent, (3) a recorded parent gets pulled
-  // DOWN to exactly one row above their child when the child ended up
-  // deeper (pushed down to match a spouse with a longer recorded lineage).
-  // Rule 3 cascades through that parent's own recorded parents and spouse
-  // on the next round too, so an entire "shallow" side of the family
-  // shifts down together, generation by generation, to line up with
-  // whatever "deep" side it married into.
-  let al=true,g2=0;
-  while(al&&g2<300){
-    al=false;g2++;
-    people.forEach(p=>{
-      (p.spouseIds||[]).forEach(sid=>{
-        if(!byId.has(sid))return;
-        const m=Math.max(level[p.id],level[sid]);
-        if(level[p.id]!==m){level[p.id]=m;al=true;}
-        if(level[sid]!==m){level[sid]=m;al=true;}
-      });
-    });
-    people.forEach(p=>{
-      (p.parentIds||[]).forEach(pid=>{
-        if(!byId.has(pid))return;
-        const want=level[p.id]-1;
-        if(level[pid]<want){level[pid]=want;al=true;}
-        else if(level[pid]>want){level[p.id]=level[pid]+1;al=true;}
-      });
-    });
-  }
-  // Normalize so the shallowest person sits at row 0 (relaxation can in
-  // theory leave everything shifted down if a root ends up deeper than
-  // originally computed via the cascade above).
-  const minLevel=people.length?Math.min(...people.map(p=>level[p.id])):0;
-  if(minLevel!==0)people.forEach(p=>{level[p.id]-=minLevel;});
-  return level;
-}
-// Order-correct, bottom-up tree layout: processes levels from the deepest
-// generation up to the roots, one level fully at a time (order, then X
-// position, before moving to the level above), so every ancestor row's
-// left-right order is always derived from the REAL, already-computed
-// positions of the row below it — guaranteeing a parent-cluster's rank
-// always matches its children's (rightmost child's parents end up
-// rightmost, an adjacent spouse's own parents end up adjacent on the
-// correct side, cascading through every generation).
-//
-// Per level:
-//  1. Group units into "clusters" — a true-sibling group (people sharing
-//     the exact same recorded parents) is one cluster and keeps its
-//     established RTL ("first-registered stays right") order, exactly what
-//     moveTreeSibling() controls; everyone else is a singleton cluster.
-//  2. Order the level's clusters by the average x of their own children
-//     (already placed, since we're going bottom-up), attributing each
-//     child to the SPECIFIC parent it descends from (not a blended couple
-//     average) so a "double cross-lineage" marriage — both spouses
-//     separately recorded as someone's child — still resolves to two
-//     distinct, correctly-ordered ancestor lines. Where no real child
-//     position exists (the deepest level, or a childless ancestor), a
-//     structural fallback rank — computed once, top-down, from each
-//     cluster's own parent's rank — is used instead (interpolated against
-//     any real-positioned neighbors in the row), so a childless branch
-//     still slots in next to the family it actually belongs to.
-//  3. Assign X positions honoring that fixed order via isotonic regression
-//     (pool-adjacent-violators): each cluster wants to sit centered on its
-//     children's average x; where clusters would overlap, they're merged
-//     into a block positioned at the average of their desired centers —
-//     the least-distorting way to "space the row out so there's room for
-//     everyone" while never reordering anything.
-function _pava(targets){
-  const blocks=[];
-  for(let i=0;i<targets.length;i++){
-    let b={sum:targets[i],count:1,start:i,end:i,val:targets[i]};
-    blocks.push(b);
-    while(blocks.length>1&&blocks[blocks.length-2].val>blocks[blocks.length-1].val+1e-9){
-      const b2=blocks.pop(),b1=blocks.pop();
-      const merged={sum:b1.sum+b2.sum,count:b1.count+b2.count,start:b1.start,end:b2.end};
-      merged.val=merged.sum/merged.count;
-      blocks.push(merged);
-    }
-  }
-  const out=new Array(targets.length);
-  blocks.forEach(b=>{ for(let i=b.start;i<=b.end;i++)out[i]=b.val; });
-  return out;
-}
-function _treePlaceRow(items,widthOf,gapAfterOf,desiredCenterOf){
-  const n=items.length;
-  const w=items.map(widthOf);
-  const off=new Array(n);
-  off[0]=0;
-  for(let i=1;i<n;i++)off[i]=off[i-1]+w[i-1]+gapAfterOf(i-1);
-  const targets=items.map((it,i)=>(desiredCenterOf(it)-w[i]/2)-off[i]);
-  const y=_pava(targets);
-  return y.map((yi,i)=>yi+off[i]);
-}
-// Two people belong in the same connected component if there's any chain
-// of parent/child/spouse links between them — parentIds only records the
-// child→parent direction, so the reverse (parent→child) is built here too.
-function _treeConnectedComponents(people){
-  const byId=new Map(people.map(p=>[p.id,p]));
-  const childrenOf=new Map();
-  people.forEach(p=>(p.parentIds||[]).forEach(pid=>{
-    if(!childrenOf.has(pid))childrenOf.set(pid,[]);
-    childrenOf.get(pid).push(p.id);
-  }));
-  const visited=new Set();
-  const components=[];
-  people.forEach(p=>{
-    if(visited.has(p.id))return;
-    const comp=[];
-    const q=[p.id];
-    visited.add(p.id);
-    while(q.length){
-      const id=q.pop();
-      const person=byId.get(id);
-      if(!person)continue;
-      comp.push(person);
-      const neighbors=[...(person.parentIds||[]),...(person.spouseIds||[]),...(childrenOf.get(id)||[])];
-      neighbors.forEach(nid=>{
-        if(!visited.has(nid)&&byId.has(nid)){visited.add(nid);q.push(nid);}
-      });
-    }
-    components.push(comp);
-  });
-  return components;
-}
-// A tree can now hold several totally unrelated families at once — e.g.
-// after importing a file, or pulling in families whose own ancestry was
-// never connected to anyone already here. Laying all of them out through
-// one shared ordering pass would let the algorithm's ordering and centering
-// (all of which assume everyone traces back to a common ancestor somewhere)
-// freely interleave two families that have nothing to do with each other.
-// So each connected component gets its OWN independent layout pass, and the
-// results are placed side by side, left to right in the order each
-// component's first member appears in `people`. A family that's connected
-// to the rest of the tree ONLY through one marriage (not fully
-// disconnected, just thinly connected) is a different, subtler case —
-// handled inside _treeLayoutComponent itself, see _freshAnchorSeq there.
+// Recursive block layout. A "unit" is a married couple (husband first, so
+// he ends up on the right after the RTL mirror at the end) or a lone person.
+// Starting from a root couple, every unit is built as a block: its children
+// below it with the parents centered over them, then for each partner their
+// siblings on that partner's outer side and their parents' block above them.
+// fit() slides a block only as far as needed so no two cards overlap on any
+// row. Applied recursively, the husband's whole ancestry ends up on the
+// right and the wife's on the left, at every generation.
 function _treeLayout(people){
-  const components=_treeConnectedComponents(people);
-  if(components.length<=1)return _treeLayoutComponent(people);
-  const pos={},claimedBy={};
-  let maxLevel=0,offsetX=0;
-  components.forEach(comp=>{
-    const r=_treeLayoutComponent(comp);
-    if(offsetX>0){
-      Object.values(r.pos).forEach(pp=>{pp.x+=offsetX;pp.cx+=offsetX;});
+  const W=TREE_NODE_W,PG=TREE_COUPLE_GAP,SG=TREE_COUPLE_GAP,FG=TREE_H_GAP,EPS=1e-6;
+  const P=new Map(),order=new Map();
+  people.forEach((r,i)=>{ order.set(r.id,i); P.set(r.id,{id:r.id,g:r.gender==='girl'?'f':'m',by:parseInt(r.birthYear,10)||null,manual:!!r.siblingOrderManual,parents:[],kids:[],mates:new Set()}); });
+  people.forEach(r=>{
+    const p=P.get(r.id);
+    p.parents=[...new Set((r.parentIds||[]).filter(x=>P.has(x)&&x!==p.id))].slice(0,2);
+    (r.spouseIds||[]).forEach(s=>{ if(P.has(s)&&s!==p.id){ p.mates.add(s); P.get(s).mates.add(p.id); } });
+  });
+  P.forEach(p=>{
+    p.parents.forEach(a=>P.get(a).kids.push(p.id));
+    // A child's two parents are a couple even if never linked as spouses.
+    if(p.parents.length===2){ const [a,b]=p.parents; P.get(a).mates.add(b); P.get(b).mates.add(a); }
+  });
+  const byOrder=(a,b)=>order.get(a)-order.get(b);
+
+  const units=[],unitOf=new Map();
+  P.forEach(p=>{
+    if(unitOf.has(p.id))return;
+    const mem=[],st=[p.id],seen=new Set([p.id]);
+    while(st.length){ const x=st.pop(); mem.push(x); P.get(x).mates.forEach(m=>{ if(!seen.has(m)){ seen.add(m); st.push(m); } }); }
+    let partners;
+    if(mem.length<=2)partners=mem.sort((a,b)=>(P.get(a).g==='m'?0:1)-(P.get(b).g==='m'?0:1)||byOrder(a,b));
+    else{
+      // More than two spouses: a chain, so every married pair stays adjacent.
+      const start=mem.slice().sort((a,b)=>P.get(a).mates.size-P.get(b).mates.size||byOrder(a,b))[0];
+      partners=[]; const s2=new Set();
+      (function walk(x){ s2.add(x); partners.push(x); P.get(x).mates.forEach(m=>{ if(!s2.has(m))walk(m); }); })(start);
     }
-    Object.assign(pos,r.pos);
-    Object.assign(claimedBy,r.claimedBy);
-    maxLevel=Math.max(maxLevel,r.maxLevel);
-    const compMaxX=Object.values(r.pos).reduce((m,pp)=>Math.max(m,pp.x+TREE_NODE_W),0);
-    offsetX=compMaxX+TREE_COMPONENT_GAP;
+    const u={id:units.length,partners,children:[]};
+    units.push(u); partners.forEach(x=>unitOf.set(x,u));
   });
-  return {pos,maxLevel,claimedBy};
-}
-function _treeLayoutComponent(people){
-  const byId=new Map(people.map(p=>[p.id,p]));
-  const level=_treeComputeLevels(people);
-  const maxLevel=people.length?Math.max(...people.map(p=>level[p.id])):0;
-  const arrayIndex=new Map(people.map((p,i)=>[p.id,i]));
-  const grank=id=>{const g=byId.get(id).gender;return g==='boy'?1:g==='girl'?-1:0;};
+  // Oldest on the right when every sibling has a birth year; otherwise, or
+  // once someone reordered them by hand (_treeFreezeSiblingOrder), array
+  // order — first recorded on the right.
+  units.forEach(u=>{
+    const ks=new Set(); u.partners.forEach(x=>P.get(x).kids.forEach(k=>ks.add(k)));
+    const kids=[...ks].sort(byOrder);
+    if(!kids.some(k=>P.get(k).manual)&&kids.every(k=>P.get(k).by))kids.sort((a,b)=>P.get(a).by-P.get(b).by||byOrder(a,b));
+    u.children=kids;
+  });
 
-  // Build couple units (male right, female left; a lone person with no
-  // same-level spouse is a width-1 unit).
-  const used=new Set(),unitOf={},units=[];
-  people.forEach(p=>{
-    if(used.has(p.id))return;
-    const spouseId=(p.spouseIds||[]).find(sid=>byId.has(sid)&&level[sid]===level[p.id]&&!used.has(sid));
-    let ids=spouseId!=null?[p.id,spouseId]:[p.id];
-    if(ids.length===2)ids=ids.slice().sort((a,b)=>grank(a)-grank(b));
-    ids.forEach(id=>used.add(id));
-    const u={ids,level:level[p.id]};
-    units.push(u);
-    ids.forEach(id=>unitOf[id]=u);
-  });
-  // Spouses always stand at the same tight spacing, so a couple always
-  // reads as a couple, and every other gap in the row stays standard too.
-  const parentUnitOfMember=id=>{
-    const p=byId.get(id);
-    if(!p.parentIds||!p.parentIds.length)return null;
-    for(const pid of p.parentIds){ const pu=unitOf[pid]; if(pu)return pu; }
-    return null;
+  const anc=new Map(),dsc=new Map();
+  const ancOf=id=>{ if(anc.has(id))return anc.get(id); const s=new Set(); anc.set(id,s); P.get(id).parents.forEach(a=>{ s.add(a); ancOf(a).forEach(x=>s.add(x)); }); return s; };
+  const dscOf=id=>{ if(dsc.has(id))return dsc.get(id); const s=new Set(); dsc.set(id,s); P.get(id).kids.forEach(k=>{ s.add(k); dscOf(k).forEach(x=>s.add(x)); }); return s; };
+  P.forEach(p=>{ p.anc=ancOf(p.id); p.dsc=dscOf(p.id); });
+
+  // Root: the couple joining the two deepest ancestries; failing that, the
+  // topmost ancestors with the most descendants.
+  const pickRoot=skip=>{
+    let best=null,bs=0;
+    units.forEach(u=>{
+      if(skip.has(u.id))return;
+      const a=u.partners.map(x=>P.get(x).anc.size).filter(n=>n>0);
+      if(a.length>=2){ const s=Math.min(...a)*1000+a.reduce((x,y)=>x+y,0); if(s>bs){ bs=s; best=u; } }
+    });
+    if(best)return best;
+    bs=-1;
+    units.forEach(u=>{
+      if(skip.has(u.id)||u.partners.some(x=>P.get(x).parents.length))return;
+      const s=Math.max(...u.partners.map(x=>P.get(x).dsc.size)); if(s>bs){ bs=s; best=u; }
+    });
+    return best||units.find(u=>!skip.has(u.id));
   };
-  const uWidth=u=>u.ids.length===2?TREE_NODE_W*2+TREE_COUPLE_GAP:TREE_NODE_W;
-  const unitMinIndex=u=>Math.min(...u.ids.map(id=>arrayIndex.get(id)));
-
-  // True-sibling clusters: people sharing the exact recorded parents set
-  // keep their established left-right (RTL, first-registered-right) order —
-  // the same convention moveTreeSibling() controls. Everyone else (no
-  // recorded parents) is their own singleton cluster.
-  const childrenByKey=new Map();
-  people.forEach(p=>{
-    if(!p.parentIds||!p.parentIds.length)return;
-    const key=[...p.parentIds].sort((a,b)=>a-b).join(',');
-    if(!childrenByKey.has(key))childrenByKey.set(key,[]);
-    childrenByKey.get(key).push(p);
+  // One root per unrelated family; the biggest family is laid out first.
+  const comp=new Map();let roots=[];
+  units.forEach(u0=>{
+    if(comp.has(u0.id))return;
+    const mem=[],st=[u0]; comp.set(u0.id,u0.id);
+    while(st.length){
+      const u=st.pop(); mem.push(u);
+      u.partners.forEach(pid=>{ const p=P.get(pid); p.parents.concat(p.kids).forEach(x=>{ const v=unitOf.get(x); if(!comp.has(v.id)){ comp.set(v.id,u0.id); st.push(v); } }); });
+    }
+    const inC=new Set(mem.map(u=>u.id));
+    roots.push({u:pickRoot(new Set(units.filter(u=>!inC.has(u.id)).map(u=>u.id))),n:mem.reduce((a,u)=>a+u.partners.length,0)});
   });
-  const rowsUnits=[];
-  for(let l=0;l<=maxLevel;l++)rowsUnits[l]=units.filter(u=>u.level===l);
-  const clusterOfUnit=new Map();
-  const clustersByLevel=[];
-  for(let l=0;l<=maxLevel;l++){
-    const seen=new Set(),clusters=[];
-    rowsUnits[l].forEach(u=>{
-      if(seen.has(u))return;
-      const sibUnitsOf=id=>{
-        const p=byId.get(id);
-        if(!p.parentIds||!p.parentIds.length)return [];
-        const pkey=[...p.parentIds].sort((a,b)=>a-b).join(',');
-        return [...new Set((childrenByKey.get(pkey)||[]).map(s=>unitOf[s.id]).filter(su=>su&&su.level===l))];
-      };
-      // Sorts sibling UNITS by their BLOOD-relative member's own array
-      // index (not unitMinIndex, which takes the min of both couple
-      // partners) — a married-in spouse's own recorded position in
-      // familyTree has nothing to do with where their partner falls among
-      // the partner's OWN siblings, and letting it leak in scrambles the
-      // sibling order unpredictably depending on unrelated data-entry
-      // order. `pkey` is the shared parentIds key these units' blood
-      // members all share. RTL: first recorded stays rightmost, so a newly
-      // added sibling appears to the LEFT of the ones before it.
-      const siblingRtl=(arr,pkey)=>arr.slice().sort((a,b)=>{
-        const keyOf=m=>{
-          const bloodId=m.ids.find(id=>_treeParentKey(byId.get(id).parentIds)===pkey);
-          return arrayIndex.get(bloodId!=null?bloodId:m.ids[0]);
-        };
-        return keyOf(b)-keyOf(a);
+  roots.sort((a,b)=>b.n-a.n); roots=roots.map(r=>r.u);
+
+  // A block is a group of cards already placed relative to each other.
+  // lv: row -> occupied spans {s0,s1}; pos: person -> {s, l}.
+  class Block{
+    constructor(){ this.lv=new Map(); this.pos=new Map(); }
+    add(l,it){ let a=this.lv.get(l); if(!a)this.lv.set(l,a=[]); a.push(it); }
+    merge(B,ds){
+      B.lv.forEach((bs,l)=>bs.forEach(b=>this.add(l,{s0:b.s0+ds,s1:b.s1+ds,fam:b.fam,single:b.single})));
+      B.pos.forEach((q,id)=>this.pos.set(id,{s:q.s+ds,l:q.l}));
+    }
+    minAt(l){ return Math.min(...this.lv.get(l).map(a=>a.s0)); }
+    maxAt(l){ return Math.max(...this.lv.get(l).map(a=>a.s1)); }
+    hits(B,ds){
+      for(const [l,bs] of B.lv){ const as=this.lv.get(l); if(!as)continue;
+        for(const a of as)for(const b of bs){ const g=gap(a,b); if(a.s0<b.s1+ds+g-EPS&&b.s0+ds<a.s1+g-EPS)return true; } }
+      return false;
+    }
+  }
+  // Unmarried siblings sit closer together; everything else gets the family gap.
+  const gap=(a,b)=>(a.fam!=null&&a.fam===b.fam&&a.single&&b.single)?SG:FG;
+  // Closest offset to `des` where B doesn't overlap X. dir: 1 forward only,
+  // -1 backward only, 0 either way.
+  const fit=(X,B,des,dir)=>{
+    if(!X.hits(B,des))return des;
+    const c=[];
+    B.lv.forEach((bs,l)=>{ const as=X.lv.get(l); if(!as)return;
+      as.forEach(a=>bs.forEach(b=>{ const g=gap(a,b);
+        if(dir>=0){ const v=a.s1+g-b.s0; if(v>des)c.push(v); }
+        if(dir<=0){ const v=a.s0-g-b.s1; if(v<des)c.push(v); } })); });
+    c.sort((p,q)=>Math.abs(p-des)-Math.abs(q-des));
+    for(const v of c)if(!X.hits(B,v))return v;
+    return des;
+  };
+  const parentUnit=id=>{ const p=P.get(id); return p.parents.length?unitOf.get(p.parents[0]):null; };
+  const halfW=u=>(u.partners.length*(W+PG)-PG)/2;
+  let visited=new Set();
+
+  // The unit's own cards, centered on 0. c = the partner we arrived through.
+  const unitBlock=(u,c,L)=>{
+    const X=new Block(),n=u.partners.length,pu=c!=null?parentUnit(c):null;
+    u.partners.forEach((id,i)=>X.pos.set(id,{s:(i-(n-1)/2)*(W+PG),l:L}));
+    X.add(L,{s0:-halfW(u),s1:halfW(u),fam:pu?pu.id:null,single:n===1});
+    return X;
+  };
+  // A unit plus everything below it, parents centered over their children.
+  const downBlock=(u,c,L)=>{
+    visited.add(u.id);
+    let row=null; const anchors=[];
+    u.children.forEach(k=>{
+      const ku=unitOf.get(k); if(visited.has(ku.id))return;
+      const r=downBlock(ku,k,L+1);
+      if(!row)row=r; else row.merge(r,fit(row,r,row.maxAt(L+1)+SG-r.minAt(L+1),1));
+      anchors.push(k);
+    });
+    const ub=unitBlock(u,c,L); let X=ub,center=0;
+    if(row){
+      const cen=(row.pos.get(anchors[0]).s+row.pos.get(anchors[anchors.length-1]).s)/2;
+      center=fit(row,ub,cen,0); row.merge(ub,center); X=row;
+    }
+    attach(X,u,L,u.partners.filter(p=>p!==c),center);
+    return X;
+  };
+  // A parent unit without its children (the caller already placed them),
+  // with its own ancestors above it.
+  const upBlock=(u,L)=>{ const X=unitBlock(u,null,L); attach(X,u,L,u.partners,0); return X; };
+  // For each given partner: their siblings on that partner's outer side,
+  // and their parents above them.
+  const attach=(X,u,L,partners,center)=>{
+    const todo=[],n=u.partners.length;
+    let eL=center-halfW(u),eR=center+halfW(u);
+    partners.forEach(p=>{
+      const pu=parentUnit(p); if(!pu||visited.has(pu.id))return;
+      visited.add(pu.id);
+      const idx=u.partners.indexOf(p),side=n===1?0:(idx<n/2?-1:1);
+      const kids=pu.children,ip=kids.indexOf(p),others=kids.filter(k=>k!==p);
+      // Single: older siblings before, younger after. Married: all siblings
+      // on their own side, away from the spouse.
+      const before=side===0?kids.slice(0,ip).reverse():side<0?others.slice().reverse():[];
+      const after=side===0?kids.slice(ip+1):side>0?others:[];
+      let lo=X.pos.get(p).s,hi=lo;
+      after.forEach(k=>{
+        const ku=unitOf.get(k); if(visited.has(ku.id))return;
+        const r=downBlock(ku,k,L);
+        const ds=fit(X,r,eR+SG-r.minAt(L),1); X.merge(r,ds); eR=r.maxAt(L)+ds; hi=Math.max(hi,r.pos.get(k).s+ds);
       });
-      // Resolve THIS unit's own sibling group (if any) via whichever of its
-      // members has recorded parents — entry-point independent, so it
-      // resolves to the exact same group and decision regardless of WHICH
-      // unit in the group happened to be encountered first while iterating
-      // the row (unlike computing this off of "u" alone, which silently
-      // changed behavior — and could break the "keep the married sibling's
-      // family on their own side" rule entirely — depending on iteration
-      // order).
-      const bloodMember=u.ids.find(id=>byId.get(id).parentIds&&byId.get(id).parentIds.length);
-      let members=[u];
-      if(bloodMember!=null){
-        const pkey=_treeParentKey(byId.get(bloodMember).parentIds);
-        const groupUnits=sibUnitsOf(bloodMember);
-        if(groupUnits.length>1){
-          // A sibling who married someone from a SEPARATELY recorded
-          // family bridges two family lines — landing that spouse between
-          // two of the sibling's own blood siblings would make it look
-          // like they're siblings too, and drags their own parents across
-          // the in-laws' line above. So that one sibling's couple-unit is
-          // pinned to whichever edge of the group puts the SPOUSE (not the
-          // blood sibling) on the true outer boundary — every other
-          // sibling, regardless of their own recorded/birth order relative
-          // to the couple, ends up on the married sibling's OWN side.
-          // Only handled when exactly one sibling in the group bridges
-          // like this — with two or more, no single edge can satisfy both,
-          // so the group falls back to plain recorded-order.
-          const bridgeUnits=groupUnits.filter(gu=>{
-            if(gu.ids.length!==2)return false;
-            const gBlood=gu.ids.find(id=>_treeParentKey(byId.get(id).parentIds)===pkey);
-            const gSpouse=gu.ids.find(id=>id!==gBlood);
-            return parentUnitOfMember(gSpouse)!=null;
-          });
-          if(bridgeUnits.length===1){
-            const bu=bridgeUnits[0];
-            const bBlood=bu.ids.find(id=>_treeParentKey(byId.get(id).parentIds)===pkey);
-            const bloodOnLeft=bu.ids[0]===bBlood;
-            const rest=siblingRtl(groupUnits.filter(gu=>gu!==bu),pkey);
-            members=bloodOnLeft?[...rest,bu]:[bu,...rest];
-          } else {
-            members=siblingRtl(groupUnits,pkey);
-          }
-        }
-      }
-      const cluster={members,level:l};
-      members.forEach(m=>{ seen.add(m); clusterOfUnit.set(m,cluster); });
-      clusters.push(cluster);
+      before.forEach(k=>{
+        const ku=unitOf.get(k); if(visited.has(ku.id))return;
+        const r=downBlock(ku,k,L);
+        const ds=fit(X,r,eL-SG-r.maxAt(L),-1); X.merge(r,ds); eL=r.minAt(L)+ds; lo=Math.min(lo,r.pos.get(k).s+ds);
+      });
+      todo.push({pu,side,c:(lo+hi)/2});
     });
-    clustersByLevel[l]=clusters;
-  }
-  const cMinIndex=c=>Math.min(...c.members.map(unitMinIndex));
-
-  // Each cluster's parent UNIT (all members share the exact same recorded
-  // parentIds by construction, so any member gives the same answer). null
-  // for a cluster with no recorded parents (a true root, or a lone married-
-  // in person forming their own unit).
-  const parentUnitOfCluster=new Map();
-  clustersByLevel.forEach(clusters=>clusters.forEach(c=>{
-    let pu=null;
-    for(const u of c.members){
-      const withParents=u.ids.find(id=>byId.get(id).parentIds&&byId.get(id).parentIds.length);
-      if(withParents!=null){
-        const pid=byId.get(withParents).parentIds.find(pid=>unitOf[pid]);
-        if(pid!=null)pu=unitOf[pid];
-        break;
-      }
-    }
-    parentUnitOfCluster.set(c,pu);
-  }));
-
-  // Structural fallback rank: a top-down pass (independent of any computed
-  // X position) that gives every unit a number reflecting its place in the
-  // family hierarchy — its parent's own rank, refined by its RTL order
-  // among its own siblings. Used ONLY as an ordering fallback where no
-  // positioned-children average is available (most commonly the deepest
-  // level), so that a childless cluster still ends up ordered consistently
-  // with whichever specific parent/branch it actually descends from,
-  // instead of by its own unrelated registration index.
-  const FALLBACK_SCALE=1e-6,FALLBACK_BASE=1e9;
-  const unitRank=new Map();
-  for(let l=0;l<=maxLevel;l++){
-    const withKey=clustersByLevel[l].map(c=>{
-      const pu=parentUnitOfCluster.get(c);
-      const key=(pu!=null&&unitRank.has(pu))?unitRank.get(pu):-cMinIndex(c)*FALLBACK_SCALE-FALLBACK_BASE;
-      return {c,key};
-    });
-    withKey.sort((a,b)=>a.key!==b.key?a.key-b.key:cMinIndex(b.c)-cMinIndex(a.c));
-    withKey.forEach(({c},idx)=>{
-      const n=c.members.length;
-      c.members.forEach((u,i)=>unitRank.set(u,idx+(i+1)/(n+2)));
-    });
-  }
-  const clusterRank=c=>Math.min(...c.members.map(u=>unitRank.get(u)));
-
-  // Direct child PERSONS of each unit, attributed to the SPECIFIC parent
-  // they descend from (not the whole unit). This matters when a couple has
-  // both spouses separately-recorded as someone's child (a "double cross-
-  // lineage" marriage) — each spouse's own ancestor-line must center on
-  // that spouse's own x, not the couple's blended average, or both
-  // ancestor-lines end up targeting the identical position and their
-  // left-right order collapses to an arbitrary tie-break.
-  const childPersonsOf=new Map(units.map(u=>[u,new Set()]));
-  people.forEach(p=>{
-    (p.parentIds||[]).forEach(pid=>{
-      const pu=unitOf[pid];
-      if(pu)childPersonsOf.get(pu).add(p.id);
-    });
-  });
-
-  // A unit's fan-out target: the average, across EVERY one of its own
-  // recorded children who is married (regardless of whether that spouse has
-  // their own recorded parents — most real trees don't have every in-law's
-  // ancestry on file), of that child's own already-resolved side. A
-  // married child who moved out and started their own household is a far
-  // better anchor for where this ancestor "belongs" than an unmarried
-  // sibling sitting at whatever arbitrary position they defaulted to — so
-  // unmarried children are left out of this average entirely (they still
-  // fall back into the plain all-children span wherever bridgingTargetCx
-  // itself returns null below, e.g. when NONE of the children are married).
-  // Only an in-law who is themselves a DESCENDANT of this very unit
-  // (op===u — a cousin marriage) is excluded from counting as "married",
-  // since that one can't meaningfully anchor a left/right side.
-  const bridgingTargetCx=u=>{
-    const kids=[...childPersonsOf.get(u)].filter(cid=>pos[cid]);
-    const married=kids.filter(cid=>{
-      const cu=unitOf[cid];
-      if(!cu||cu.ids.length!==2)return false;
-      const other=cu.ids.find(id=>id!==cid);
-      const op=parentUnitOfMember(other);
-      return op!==u&&pos[other];
-    });
-    if(!married.length)return null;
-    const targets=married.map(cid=>{
-      const cu=unitOf[cid],other=cu.ids.find(id=>id!==cid);
-      const op=parentUnitOfMember(other);
-      // No second recorded family on the in-law's side to open a visual
-      // gap against — just track this child's own resolved position
-      // directly, same as a true only child would anchor this ancestor.
-      if(!op)return pos[cid].cx;
-      const mid=(pos[cid].cx+pos[other].cx)/2;
-      return pos[cid].cx<pos[other].cx
-        ?mid-TREE_FANOUT_GAP/2-uWidth(u)/2
-        :mid+TREE_FANOUT_GAP/2+uWidth(u)/2;
-    });
-    return targets.reduce((s,x)=>s+x,0)/targets.length;
+    todo.forEach(t=>{ t.B=upBlock(t.pu,L-1); });
+    if(todo.length===2&&todo[0].side<0&&todo[1].side>0){
+      // His parents and hers: if they collide, push both apart equally so
+      // the couple stays centered between them.
+      const [a,b]=todo; let da=a.c,db=b.c;
+      const tmp=new Block(); tmp.merge(a.B,da);
+      const db2=fit(tmp,b.B,db,1),ex=db2-db; da-=ex/2; db=db2-ex/2;
+      da=fit(X,a.B,da,-1); X.merge(a.B,da);
+      db=fit(X,b.B,db,1); X.merge(b.B,db);
+    }else todo.forEach(t=>X.merge(t.B,fit(X,t.B,t.c,t.side)));
   };
+
+  const X=downBlock(roots[0],null,0);
+  const placeBeside=u=>{
+    const B=downBlock(u,null,0); let far=-Infinity,near=Infinity;
+    X.lv.forEach(a=>a.forEach(i=>{ far=Math.max(far,i.s1); }));
+    B.lv.forEach(a=>a.forEach(i=>{ near=Math.min(near,i.s0); }));
+    X.merge(B,far+TREE_COMPONENT_GAP-near);
+  };
+  roots.slice(1).forEach(u=>{ if(!visited.has(u.id))placeBeside(u); });
+  units.forEach(u=>{ if(!visited.has(u.id))placeBeside(u); });
+
+  let s0=Infinity,s1=-Infinity,minL=Infinity,maxL=-Infinity;
+  X.pos.forEach(q=>{ s0=Math.min(s0,q.s); s1=Math.max(s1,q.s); minL=Math.min(minL,q.l); maxL=Math.max(maxL,q.l); });
   const pos={};
-  const pathOf=new Map();
-  // Each fresh anchor (see below) gets tagged with its own unique negative
-  // number instead of sharing a bare `[]` with every other fresh anchor.
-  // Without this, two completely unrelated prolific ancestors elsewhere in
-  // the tree (each with several married children of their own, so each
-  // becomes its own fresh anchor) would both carry the identical empty
-  // path — making everything built on top of EITHER of them compare as
-  // "equal" by path and fall through to the structural fallback order,
-  // which has no notion that they're separate lineages and happily
-  // interleaves them. A unique id keeps every fresh anchor's own upward
-  // lineage grouped as one block, distinguishable from any other anchor's.
-  let _freshAnchorSeq=0;
-  const placeUnitAt=(u,leftX)=>{
-    const step=uWidth(u)-TREE_NODE_W;
-    u.ids.forEach((id,i)=>{
-      const ix=leftX+i*step;
-      pos[id]={x:ix,y:u.level*TREE_LEVEL_H,cx:ix+TREE_NODE_W/2,cy:u.level*TREE_LEVEL_H+TREE_NODE_H/2,bottom:u.level*TREE_LEVEL_H+TREE_NODE_H};
-    });
-  };
-
-  // Process levels bottom-up: order this row (using the row below's ALREADY
-  // KNOWN real positions), then position this row, before moving up.
-  for(let l=maxLevel;l>=0;l--){
-    const rowClusters=clustersByLevel[l];
-    // Hierarchical "macro path": which side of its single connecting
-    // child's own marriage this unit continues from, chained all the way
-    // down to whatever marriage anchors this whole line of descent. Used
-    // below as the PRIMARY sort key so an entire ancestral block (both
-    // sides of every couple in the chain) stays grouped together at every
-    // level, instead of an unrelated unit from a different branch landing
-    // geometrically between two halves of the same block — bridgingTargetCx
-    // alone only keeps a unit near ITS OWN child, it has no notion of
-    // staying grouped with second-cousins-once-removed on the same side.
-    if(l===maxLevel){
-      rowClusters.forEach(c=>c.members.forEach(u=>pathOf.set(u,[])));
-    } else {
-      rowClusters.forEach(c=>c.members.forEach(u=>{
-        const kids=[...childPersonsOf.get(u)].filter(cid=>pos[cid]);
-        const married=kids.filter(cid=>{
-          const cu=unitOf[cid];
-          if(!cu||cu.ids.length!==2)return false;
-          const other=cu.ids.find(id=>id!==cid);
-          const op=parentUnitOfMember(other);
-          return op!==u&&pos[other];
-        });
-        if(married.length===1){
-          const c0=married[0],cu=unitOf[c0],other=cu.ids.find(id=>id!==c0);
-          const direction=pos[c0].cx<pos[other].cx?0:1;
-          pathOf.set(u,[...pathOf.get(cu),direction]);
-          return;
-        }
-        // No single line of descent to continue from (no married child, or
-        // several of them forking off in different directions — a parent
-        // of many, like most real ancestors) — this unit becomes a fresh
-        // anchor for whatever sits above IT, similar to the bottom-most
-        // row's own base case above, but tagged with its own unique id (see
-        // _freshAnchorSeq) rather than sharing a bare `[]` with every other
-        // fresh anchor. It can't itself be ordered by a path through its
-        // many children, but its own parents still deserve one.
-        //
-        // When two fresh anchors DO end up compared against each other —
-        // two families that only meet through a single marriage somewhere
-        // below, each side prolific enough to anchor itself independently
-        // — the tree's own root family (TREE_ROOT_SURNAME, the "home" side
-        // this whole app is built around) is kept on the right, the same
-        // side a blood descendant of it already gets via bloodGender in
-        // _buildFamilyTreeEntry, regardless of which specific person's own
-        // gender happens to be the one who married across into it.
-        const isRootSide=u.ids.some(id=>byId.get(id)?.surname===TREE_ROOT_SURNAME);
-        pathOf.set(u,[(isRootSide?1:-1)*(1000+(++_freshAnchorSeq))]);
-      }));
-    }
-    // Center on the SPAN of children (midpoint of min/max x), not their
-    // average — matches the original "parent sits centered over its
-    // children" convention: with one child, min===max, so the parent lands
-    // exactly centered on that one child; with several, the parent centers
-    // on their overall spread rather than being pulled toward wherever more
-    // of them happen to cluster.
-    const childCxAvg=c=>{
-      const xs=[];
-      c.members.forEach(u=>{
-        const bt=bridgingTargetCx(u);
-        if(bt!=null){ xs.push(bt); return; }
-        childPersonsOf.get(u).forEach(cid=>{ if(pos[cid])xs.push(pos[cid].cx); });
-      });
-      return xs.length?(Math.min(...xs)+Math.max(...xs))/2:null;
-    };
-    // Structural (hierarchy-only) order — always well-defined, used as a
-    // baseline and as the source of a "virtual" desired position for any
-    // cluster that has no real descendant position to go on (this row is
-    // the deepest level, or this particular cluster has no recorded kids).
-    // A childless cluster's virtual position is interpolated between the
-    // nearest structurally-neighboring clusters that DO have a real one, so
-    // it slots in among its siblings/cousins rather than being shoved to
-    // one edge of the row by an arbitrary large constant.
-    const structOrder=rowClusters.slice().sort((a,b)=>clusterRank(a)-clusterRank(b));
-    const avgOf=new Map(rowClusters.map(c=>[c,childCxAvg(c)]));
-    const virtual=new Map();
-    structOrder.forEach(c=>{ if(avgOf.get(c)!=null)virtual.set(c,avgOf.get(c)); });
-    let vi=0;
-    while(vi<structOrder.length){
-      if(virtual.has(structOrder[vi])){ vi++; continue; }
-      let vj=vi;
-      while(vj<structOrder.length&&!virtual.has(structOrder[vj]))vj++;
-      const leftVal=vi>0?virtual.get(structOrder[vi-1]):null;
-      const rightVal=vj<structOrder.length?virtual.get(structOrder[vj]):null;
-      for(let k=vi;k<vj;k++){
-        let v;
-        if(leftVal!=null&&rightVal!=null)v=leftVal+(rightVal-leftVal)*((k-vi+1)/(vj-vi+1));
-        else if(leftVal!=null)v=leftVal;
-        else if(rightVal!=null)v=rightVal;
-        else v=clusterRank(structOrder[k]);
-        virtual.set(structOrder[k],v);
-      }
-      vi=vj;
-    }
-    const clusterPath=c=>{
-      for(const u of c.members){ const p=pathOf.get(u); if(p!=null)return p; }
-      return null;
-    };
-    const comparePath=(pa,pb)=>{
-      const len=Math.min(pa.length,pb.length);
-      for(let i=0;i<len;i++){ if(pa[i]!==pb[i])return pa[i]-pb[i]; }
-      return pa.length-pb.length;
-    };
-    const ordered=rowClusters.slice().sort((a,b)=>{
-      // The macro path takes priority over the plain local target whenever
-      // BOTH clusters have one — see pathOf above.
-      const pa=clusterPath(a),pb=clusterPath(b);
-      if(pa!=null&&pb!=null){
-        const c=comparePath(pa,pb);
-        if(c!==0)return c;
-      }
-      const av=virtual.get(a),bv=virtual.get(b);
-      if(av!==bv)return av-bv;
-      return clusterRank(a)-clusterRank(b);
-    });
-
-    // Cluster order only decides SEQUENCE — actual X placement happens per
-    // UNIT, each centered on its OWN attributed children, not the whole
-    // sibling group's combined span. Without this, a multi-member cluster
-    // (several full siblings) was centered as one block and its members
-    // then laid out sequentially inside that block, completely disconnected
-    // from where each individual sibling's own kids ended up — exactly the
-    // "parent not above its own children" bug this fixes.
-    const flatUnits=ordered.flatMap(c=>c.members);
-    const clusterOfFlatUnit=new Map();
-    ordered.forEach(c=>c.members.forEach(u=>clusterOfFlatUnit.set(u,c)));
-    const unitChildCx=u=>{
-      const kids=[...childPersonsOf.get(u)].filter(cid=>pos[cid]);
-      if(!kids.length)return null;
-      // When one of this unit's children married someone whose OWN parents
-      // are also recorded, both parent couples want the very same spot —
-      // right above two spouses standing side by side — and they can't
-      // both have it. Instead of pulling those spouses apart (which stops
-      // them from reading as a couple), fan the two parent couples out to
-      // either side of the couple's midpoint. Each stays on its own
-      // child's side, so their connecting lines still never reach across
-      // each other — even when that child has siblings of their own too.
-      const bt=bridgingTargetCx(u);
-      if(bt!=null)return bt;
-      const xs=kids.map(cid=>pos[cid].cx);
-      return (Math.min(...xs)+Math.max(...xs))/2;
-    };
-    const unitAvgOf=new Map(flatUnits.map(u=>[u,unitChildCx(u)]));
-    const unitVirtual=new Map();
-    flatUnits.forEach(u=>{ if(unitAvgOf.get(u)!=null)unitVirtual.set(u,unitAvgOf.get(u)); });
-    let ui=0;
-    while(ui<flatUnits.length){
-      if(unitVirtual.has(flatUnits[ui])){ ui++; continue; }
-      let uj=ui;
-      while(uj<flatUnits.length&&!unitVirtual.has(flatUnits[uj]))uj++;
-      const leftVal=ui>0?unitVirtual.get(flatUnits[ui-1]):null;
-      const rightVal=uj<flatUnits.length?unitVirtual.get(flatUnits[uj]):null;
-      for(let k=ui;k<uj;k++){
-        let v;
-        if(leftVal!=null&&rightVal!=null)v=leftVal+(rightVal-leftVal)*((k-ui+1)/(uj-ui+1));
-        else if(leftVal!=null)v=leftVal;
-        else if(rightVal!=null)v=rightVal;
-        else v=unitRank.get(flatUnits[k]);
-        unitVirtual.set(flatUnits[k],v);
-      }
-      ui=uj;
-    }
-    const desiredByUnit=new Map(flatUnits.map(u=>[u,unitAvgOf.get(u)!=null?unitAvgOf.get(u):unitVirtual.get(u)]));
-    // Normal spacing everywhere: spouses stay tight, siblings and unrelated
-    // couples keep the standard gap. The only place extra room is added is
-    // between two parent couples splitting around a married couple — see
-    // TREE_FANOUT_GAP in unitChildCx above.
-    const gapAfter=i=>(clusterOfFlatUnit.get(flatUnits[i])===clusterOfFlatUnit.get(flatUnits[i+1]))?TREE_COUPLE_GAP:TREE_H_GAP;
-    const leftEdges=_treePlaceRow(flatUnits,uWidth,gapAfter,u=>desiredByUnit.get(u));
-    flatUnits.forEach((u,i)=>placeUnitAt(u,leftEdges[i]));
-  }
-
-  // Top-down pass over the ancestry. Along a line of ancestry a couple sits
-  // midway between the husband's parents and the wife's parents — or, where
-  // only one side is recorded, that one child sits directly under their
-  // parents — so the generation above always has room laid out side by
-  // side. The row is then re-fitted with the same isotonic placement used
-  // above, which makes room for those targets by spreading the row rather
-  // than giving up when a neighbour is in the way; it never reorders.
-  //
-  // Only units on a single-child line of ancestry get a target. A couple
-  // with several children of its own must stay centred on those children
-  // instead, and siblings must stay spread as a group under their shared
-  // parents rather than each piling onto the same spot — everyone else
-  // simply keeps their current position and is pushed aside only if the
-  // targets above genuinely need the room.
-  const unitLeftX=u=>Math.min(...u.ids.map(id=>pos[id].x));
-  const unitCenterX=u=>{const xs=u.ids.map(id=>pos[id].cx);return (Math.min(...xs)+Math.max(...xs))/2;};
-  const kidUnitsOf=u=>{
-    const ks=new Set();
-    childPersonsOf.get(u).forEach(cid=>{ const ku=unitOf[cid]; if(ku)ks.add(ku); });
-    return ks;
-  };
-  for(let l=1;l<=maxLevel;l++){
-    const row=units.filter(u=>u.level===l&&u.ids.every(id=>pos[id])).sort((a,b)=>unitLeftX(a)-unitLeftX(b));
-    if(!row.length)continue;
-    const desired=row.map(u=>{
-      // Every couple belongs centred between its own two parent-in-law
-      // sides below (the man's parents and the woman's parents) — now that
-      // the bottom-up pass above groups each ancestral block together by
-      // its macro path, this plain symmetric centering no longer needs to
-      // defer to bridgingTargetCx's fan-out pull: that pull was only ever
-      // needed to compensate for blocks landing in the wrong row sequence,
-      // which the macro path now guarantees against directly. But a unit
-      // that itself branches (several children of its own, or a shared
-      // parent with several children) must stay put at its bottom-up
-      // position instead — centering it on its own two parent-sides would
-      // drag it away from its own children, who were never moved.
-      const links=u.ids.map(id=>({id,pu:parentUnitOfMember(id)}))
-        .filter(k=>k.pu&&k.pu!==u&&k.pu.ids.every(id=>pos[id]));
-      const parents=[...new Set(links.map(k=>k.pu))];
-      if(!parents.length)return unitCenterX(u);
-      if(kidUnitsOf(u).size!==1)return unitCenterX(u);
-      if(!parents.every(pu=>kidUnitsOf(pu).size<=1))return unitCenterX(u);
-      if(parents.length>1){
-        const cs=parents.map(unitCenterX);
-        return (Math.min(...cs)+Math.max(...cs))/2;
-      }
-      // One side only: aim that child under their parents, which means
-      // offsetting the couple by however far the child sits from its middle.
-      return unitCenterX(parents[0])+(unitCenterX(u)-pos[links[0].id].cx);
-    });
-    const want=new Map(row.map((u,i)=>[u,desired[i]]));
-    // Same minimum gaps as the original placement — siblings at the tight
-    // couple gap, everyone else at the standard one — so re-fitting a row
-    // that has no targets in it leaves that row exactly as it was.
-    const rowGap=i=>(clusterOfUnit.get(row[i])===clusterOfUnit.get(row[i+1]))?TREE_COUPLE_GAP:TREE_H_GAP;
-    const edges=_treePlaceRow(row,uWidth,rowGap,u=>want.get(u));
-    row.forEach((u,i)=>{
-      const delta=edges[i]-unitLeftX(u);
-      if(Math.abs(delta)<0.01)return;
-      u.ids.forEach(id=>{ pos[id].x+=delta; pos[id].cx+=delta; });
-    });
-  }
-
-  // Shift everything into positive space.
-  const allX=Object.values(pos).map(pp=>pp.x);
-  const minX=allX.length?Math.min(...allX):0;
-  if(minX<0)Object.values(pos).forEach(pp=>{pp.x-=minX;pp.cx-=minX;});
-
+  // Mirror for RTL: the first partner (the husband) and the first-recorded
+  // child land on the right.
+  X.pos.forEach((q,id)=>{
+    const x=s1-q.s,y=(q.l-minL)*TREE_LEVEL_H;
+    pos[id]={x,y,cx:x+W/2,cy:y+TREE_NODE_H/2,bottom:y+TREE_NODE_H};
+  });
   const claimedBy={};
   people.forEach(p=>{ if(p.parentIds&&p.parentIds.length)claimedBy[p.id]=[...p.parentIds].sort((a,b)=>a-b).join(','); });
-
-  return {pos,maxLevel,claimedBy};
+  return {pos,maxLevel:X.pos.size?maxL-minL:0,claimedBy};
 }
 function renderFamilyTree(){
   const canvas=document.getElementById('treeCanvas');if(!canvas)return;
@@ -2806,10 +2351,24 @@ function saveTreePersonChanges(){
 // order) — a constrained, no-mess way to control left-right order directly,
 // instead of relying on birth-year data that's often missing or free-form
 // dragging that got confusing.
+// Siblings show oldest-first by birth year until someone reorders them by
+// hand. The first manual move writes the order currently on screen into the
+// array and marks the group, so the year sort stops overriding it.
+function _treeFreezeSiblingOrder(key){
+  if(!key)return;
+  const slots=[];
+  familyTree.forEach((x,i)=>{ if(_treeParentKey(x.parentIds)===key)slots.push(i); });
+  const sibs=slots.map(i=>familyTree[i]);
+  const year=x=>parseInt(x.birthYear,10)||null;
+  if(!sibs.some(x=>x.siblingOrderManual)&&sibs.every(year))
+    sibs.sort((a,b)=>year(a)-year(b)||familyTree.indexOf(a)-familyTree.indexOf(b));
+  slots.forEach((i,j)=>{ familyTree[i]=sibs[j]; sibs[j].siblingOrderManual=true; });
+}
 function moveTreeSibling(dir){
   const p=familyTree.find(x=>x.id===_treeActivePersonId);if(!p)return;
   const key=ids=>[...(ids||[])].sort((a,b)=>a-b).join(',');
   const myKey=key(p.parentIds);
+  _treeFreezeSiblingOrder(myKey);
   const siblingIdxs=[];
   familyTree.forEach((x,i)=>{ if(key(x.parentIds)===myKey)siblingIdxs.push(i); });
   const idx=familyTree.indexOf(p);
@@ -2858,6 +2417,7 @@ function treeCardDrop(e,targetId){
     showToast('אפשר להחליף מקום רק בין אחים מאותם הורים');
     return;
   }
+  _treeFreezeSiblingOrder(key(a.parentIds));
   const idxA=familyTree.indexOf(a),idxB=familyTree.indexOf(b);
   [familyTree[idxA],familyTree[idxB]]=[familyTree[idxB],familyTree[idxA]];
   save();renderFamilyTree();
