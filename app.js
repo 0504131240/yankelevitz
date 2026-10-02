@@ -1345,8 +1345,8 @@ function _syncTreeAncestorsBtn(p){
 }
 
 // The families already in the app are treated as siblings of one another —
-// each one's own blood relative (see rootSurname below) is seeded as a
-// child of one shared placeholder root couple, instead of each family
+// each one's own blood relative (see TREE_ROOT_SURNAME below) is seeded as
+// a child of one shared placeholder root couple, instead of each family
 // being its own disconnected root. Rename that placeholder pair to the
 // real grandparents once seeded.
 function seedFamilyTreeIfEmpty(){
@@ -1354,40 +1354,193 @@ function seedFamilyTreeIfEmpty(){
   familyTree=_buildSeedFamilyTree();
   save();
 }
+// A family carrying the app's own surname kept it (a son); any other
+// surname married in from outside (a daughter) — just a starting guess for
+// each family's blood relative's gender, fully editable afterward.
+const TREE_ROOT_SURNAME='שטיינהרט';
 function _buildSeedFamilyTree(){
-  const people=[];
-  const root1={id:nxtTreePerson++,name:'הורה 1',surname:'',gender:'',parentIds:[],spouseIds:[],sourceFamId:null};
-  const root2={id:nxtTreePerson++,name:'הורה 2',surname:'',gender:'',parentIds:[],spouseIds:[root1.id],sourceFamId:null};
+  const root1={id:nxtTreePerson++,name:'הורה 1',surname:'',gender:'',parentIds:[],spouseIds:[],sourceFamId:null,isTreeRoot:true,birthYear:'',deathYear:'',deceased:false,maidenName:''};
+  const root2={id:nxtTreePerson++,name:'הורה 2',surname:'',gender:'',parentIds:[],spouseIds:[root1.id],sourceFamId:null,isTreeRoot:true,birthYear:'',deathYear:'',deceased:false,maidenName:''};
   root1.spouseIds.push(root2.id);
-  people.push(root1,root2);
+  const people=[root1,root2];
   const rootIds=[root1.id,root2.id];
-  // A family carrying the app's own surname kept it (a son); any other
-  // surname married in from outside (a daughter) — just a starting guess
-  // for each family's blood relative's gender, fully editable afterward.
-  const rootSurname='שטיינהרט';
+  families.forEach(f=>people.push(..._buildFamilyTreeEntry(f,rootIds)));
+  return people;
+}
+// One family's own tree people (parent couple + kids), hanging off the
+// given root parentIds — shared by the full seed above and by pulling in
+// just the families that are missing from an already-started tree below.
+// Tags every person with the same sourceFamId, so the tree can color-code
+// each branch (see col() in renderFamilyTree), and a later pull can tell
+// which families are already represented.
+function _buildFamilyTreeEntry(f,rootParentIds){
+  const people=[];
+  const surname=f.name.replace('משפחת','').trim();
+  const bloodGender=surname===TREE_ROOT_SURNAME?'boy':'girl';
+  const p1={id:nxtTreePerson++,name:f.emailName||'הורה 1',surname,gender:bloodGender,parentIds:rootParentIds?[...rootParentIds]:[],spouseIds:[],sourceFamId:f.id,birthYear:'',deathYear:'',deceased:false,maidenName:''};
+  people.push(p1);
+  let parentIds=[p1.id];
+  if(!f.parent2Removed){
+    const p2={id:nxtTreePerson++,name:f.emailName2||'הורה 2',surname,gender:bloodGender==='boy'?'girl':'boy',parentIds:[],spouseIds:[p1.id],sourceFamId:f.id,birthYear:'',deathYear:'',deceased:false,maidenName:''};
+    p1.spouseIds.push(p2.id);
+    people.push(p2);
+    parentIds=[p1.id,p2.id];
+  }
+  (f.kids||[]).forEach(k=>{
+    if(!k.name)return;
+    people.push({id:nxtTreePerson++,name:k.name,surname,gender:k.gender==='boy'||k.gender==='girl'?k.gender:'',parentIds:[...parentIds],spouseIds:[],sourceFamId:f.id,birthYear:_treeBirthYearFromHeb(k.hebYear,k.hebMonth,k.hebDay),deathYear:'',deceased:false,maidenName:''});
+  });
+  return people;
+}
+function _treeBirthYearFromHeb(hebYear,hebMonth,hebDay){
+  const d=hebrewToGregorian(hebYear,hebMonth,hebDay);
+  return d?String(d.getFullYear()):'';
+}
+// ── Export / import / pull-from-families ────────────────────────────────
+function openTreeToolsModal(){
+  document.getElementById('treeToolsModal').style.display='flex';
+}
+function closeTreeToolsModal(){
+  document.getElementById('treeToolsModal').style.display='none';
+}
+function exportFamilyTree(){
+  if(!familyTree.length){ showToast('אין עדיין אנשים בעץ לייצוא'); return; }
+  const blob=new Blob([JSON.stringify(familyTree,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`אילן-יוחסין-${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  closeTreeToolsModal();
+}
+function importFamilyTreeFile(inp){
+  if(!inp.files||!inp.files[0])return;
+  const file=inp.files[0];
+  const reader=new FileReader();
+  reader.onload=e=>{
+    inp.value='';
+    let data;
+    try{ data=JSON.parse(e.target.result); }catch(err){ alert('הקובץ הזה אינו JSON תקין'); return; }
+    if(!Array.isArray(data)||!data.length){ alert('הקובץ אינו בפורמט המצופה (ייצוא של אילן יוחסין)'); return; }
+    _importTreePeople(data);
+  };
+  reader.readAsText(file);
+}
+// Imported people are always appended as new — ids are remapped to this
+// tree's own counter so they can never collide with (or overwrite) anyone
+// already here. Re-importing the same file twice will duplicate it; nothing
+// tries to guess which imported person "is" an existing one.
+function _importTreePeople(data){
+  const idMap=new Map();
+  data.forEach(p=>{ if(p&&p.id!=null)idMap.set(p.id,nxtTreePerson++); });
+  const remapped=data.filter(p=>p&&p.id!=null).map(p=>({
+    id:idMap.get(p.id),
+    name:p.name||'',
+    surname:p.surname||'',
+    gender:p.gender==='boy'||p.gender==='girl'?p.gender:'',
+    parentIds:(p.parentIds||[]).map(pid=>idMap.get(pid)).filter(x=>x!=null),
+    spouseIds:(p.spouseIds||[]).map(sid=>idMap.get(sid)).filter(x=>x!=null),
+    mainLineChildId:p.mainLineChildId!=null&&idMap.has(p.mainLineChildId)?idMap.get(p.mainLineChildId):null,
+    collapsed:!!p.collapsed,
+    collapsedUp:!!p.collapsedUp,
+    sourceFamId:null,
+    birthYear:p.birthYear||'',
+    deathYear:p.deathYear||'',
+    deceased:!!p.deceased,
+    maidenName:p.maidenName||'',
+    photo:p.photo||null,
+  }));
+  if(!remapped.length){ alert('לא נמצאו אנשים תקינים בקובץ'); return; }
+  familyTree=familyTree.concat(remapped);
+  save();
+  renderFamilyTreeIfOpen();
+  _fitTreeWhenReady();
+  closeTreeToolsModal();
+  showToast(`📥 יובאו ${remapped.length} אנשים לעץ`);
+}
+// Add whatever the regular family data (families[] — parents, kids, their
+// Hebrew birthdays) has that this tree doesn't yet: a brand new family gets
+// seeded in whole; a family already represented only gets its MISSING kids
+// added, matched by name against whoever here isn't already one of this
+// family's own tagged parents. Existing people — including ones renamed or
+// otherwise hand-edited in the tree since — are never touched, matching the
+// same never-delete, add-only promise as importing a file above.
+function pullTreeFromFamilies(){
+  if(!families.length){ showToast('אין עדיין משפחות באתר הרגיל'); closeTreeToolsModal(); return; }
+  const wasEmpty=!familyTree.length;
+  seedFamilyTreeIfEmpty();
+  if(wasEmpty){
+    renderFamilyTreeIfOpen();
+    _fitTreeWhenReady();
+    closeTreeToolsModal();
+    showToast(`🌳 נבנה עץ ראשוני מ-${families.length} משפחות`);
+    return;
+  }
+  const rootIds=_treeFindOrCreateFamilyRoot();
+  let addedFamilies=0,addedPeople=0;
   families.forEach(f=>{
-    const surname=f.name.replace('משפחת','').trim();
-    const bloodGender=surname===rootSurname?'boy':'girl';
-    // Tags every person seeded from this family with the same origin id, so
-    // the tree can color-code each branch (see col() in renderFamilyTree)
-    // and it's visually obvious who belongs to whom even in a wide tree.
-    const p1={id:nxtTreePerson++,name:f.emailName||'הורה 1',surname,gender:bloodGender,parentIds:[...rootIds],spouseIds:[],sourceFamId:f.id};
-    people.push(p1);
-    let parentIds=[p1.id];
-    if(!f.parent2Removed){
-      const p2={id:nxtTreePerson++,name:f.emailName2||'הורה 2',surname,gender:bloodGender==='boy'?'girl':'boy',parentIds:[],spouseIds:[p1.id],sourceFamId:f.id};
-      p1.spouseIds.push(p2.id);
-      people.push(p2);
-      parentIds=[p1.id,p2.id];
+    const famPeople=familyTree.filter(p=>p.sourceFamId===f.id);
+    if(!famPeople.length){
+      const entry=_buildFamilyTreeEntry(f,rootIds);
+      familyTree.push(...entry);
+      addedFamilies++;addedPeople+=entry.length;
+      return;
     }
+    const parentIdSet=new Set(_famParentIds(famPeople));
+    const existingKidNames=new Set(famPeople.filter(p=>!parentIdSet.has(p.id)).map(p=>p.name));
+    const surname=f.name.replace('משפחת','').trim();
     (f.kids||[]).forEach(k=>{
-      if(!k.name)return;
-      people.push({id:nxtTreePerson++,name:k.name,surname,gender:k.gender==='boy'||k.gender==='girl'?k.gender:'',parentIds:[...parentIds],spouseIds:[],sourceFamId:f.id});
+      if(!k.name||existingKidNames.has(k.name))return;
+      familyTree.push({id:nxtTreePerson++,name:k.name,surname,gender:k.gender==='boy'||k.gender==='girl'?k.gender:'',parentIds:[...parentIdSet],spouseIds:[],sourceFamId:f.id,birthYear:_treeBirthYearFromHeb(k.hebYear,k.hebMonth,k.hebDay),deathYear:'',deceased:false,maidenName:''});
+      addedPeople++;
     });
   });
-  // Never leave these undefined (Firestore's setDoc throws on that).
-  people.forEach(p=>{p.birthYear='';p.deathYear='';p.deceased=false;p.maidenName='';});
-  return people;
+  closeTreeToolsModal();
+  if(!addedPeople){ showToast('הכול כבר מעודכן — לא נמצאו נתונים חדשים להוסיף'); return; }
+  save();
+  renderFamilyTreeIfOpen();
+  _fitTreeWhenReady();
+  showToast(`🔄 נוספו ${addedPeople} אנשים לעץ`+(addedFamilies?` (${addedFamilies} משפחות חדשות)`:''));
+}
+// Whoever among this family's own tagged tree people is already pointed to
+// as a parent by one of the others — no role tag needed, the existing
+// parentIds structure already says who's who. With nobody pointing to
+// anyone yet (just a childless couple seeded so far), everyone tagged so
+// far must BE the parents.
+function _famParentIds(famPeople){
+  const s=new Set();
+  famPeople.forEach(p=>(p.parentIds||[]).forEach(pid=>{ if(famPeople.some(q=>q.id===pid))s.add(pid); }));
+  return s.size?[...s]:famPeople.map(p=>p.id);
+}
+// The shared placeholder root couple every top-level family hangs off of —
+// found by its isTreeRoot tag when the tree was seeded after that existed,
+// or (for an older tree) by whichever parentIds pair is shared by people
+// from 2+ different families. Only creates a fresh one if truly nothing was
+// ever seeded into this tree before.
+function _treeFindOrCreateFamilyRoot(){
+  const root=familyTree.find(p=>p.isTreeRoot);
+  if(root){
+    const spouse=familyTree.find(p=>p.id===(root.spouseIds||[])[0]);
+    return spouse?[root.id,spouse.id]:[root.id];
+  }
+  const counts=new Map();
+  familyTree.forEach(p=>{
+    if(p.sourceFamId==null||!p.parentIds||!p.parentIds.length)return;
+    const key=[...p.parentIds].sort((a,b)=>a-b).join(',');
+    if(!counts.has(key))counts.set(key,new Set());
+    counts.get(key).add(p.sourceFamId);
+  });
+  let best=null,bestN=0;
+  counts.forEach((fams,key)=>{ if(fams.size>bestN){bestN=fams.size;best=key;} });
+  if(best)return best.split(',').map(Number);
+  const root1={id:nxtTreePerson++,name:'הורה 1',surname:'',gender:'',parentIds:[],spouseIds:[],sourceFamId:null,isTreeRoot:true,birthYear:'',deathYear:'',deceased:false,maidenName:''};
+  const root2={id:nxtTreePerson++,name:'הורה 2',surname:'',gender:'',parentIds:[],spouseIds:[root1.id],sourceFamId:null,isTreeRoot:true,birthYear:'',deathYear:'',deceased:false,maidenName:''};
+  root1.spouseIds.push(root2.id);
+  familyTree.push(root1,root2);
+  return [root1.id,root2.id];
 }
 function openFamilyTreeOverlay(){
   seedFamilyTreeIfEmpty();

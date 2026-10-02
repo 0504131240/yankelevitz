@@ -975,6 +975,7 @@
     <div style="display:flex;gap:6px">
       <button onclick="openTreeLeaderboardModal()" title="תחרות מילוי העץ" style="background:var(--surface2);color:var(--text);border:none;border-radius:var(--r2);width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">🏆</button>
       <button id="treeStatsBtn" onclick="toggleTreeStatsMode()" title="סטטיסטיקות — סמנו חלק מהעץ או את כולו" style="background:var(--surface2);color:var(--text2);border:none;border-radius:var(--r2);padding:7px 11px;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer;white-space:nowrap">📊</button>
+      <button onclick="openTreeToolsModal()" title="ייצוא / ייבוא / משיכת נתונים" style="background:var(--surface2);color:var(--text);border:none;border-radius:var(--r2);width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">📁</button>
       <!-- Temporary debug button (openTreeDebugDump) — remove once the
            real-data ordering discrepancy is resolved. -->
       <button onclick="openTreeDebugDump()" title="דיבוג זמני — ייצוא נתונים" style="background:var(--surface2);color:var(--text2);border:none;border-radius:var(--r2);width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">🐞</button>
@@ -1001,6 +1002,19 @@
     <button onclick="zoomTree(-0.15)" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--surface2);color:var(--text);font-size:18px;font-weight:700;cursor:pointer;font-family:var(--font)">－</button>
     <button onclick="fitTreeToScreen()" style="padding:0 12px;height:32px;border-radius:16px;border:none;background:var(--surface2);color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:var(--font)">⤢ הצג הכל</button>
     <button onclick="zoomTree(0.15)" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--surface2);color:var(--text);font-size:18px;font-weight:700;cursor:pointer;font-family:var(--font)">＋</button>
+  </div>
+</div>
+
+<!-- Family tree: export / import / pull-from-families -->
+<input type="file" accept="application/json,.json" id="treeImportFileInp" style="display:none" onchange="importFamilyTreeFile(this)">
+<div id="treeToolsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2100;align-items:center;justify-content:center;padding:20px;box-sizing:border-box" onclick="if(event.target===this)closeTreeToolsModal()">
+  <div style="background:var(--surface);border-radius:var(--r);border:1px solid var(--border);padding:18px;width:100%;max-width:340px;box-sizing:border-box;display:flex;flex-direction:column;gap:8px">
+    <div style="font-size:14px;font-weight:700;margin-bottom:4px;text-align:center;color:var(--text)">📁 ייצוא / ייבוא</div>
+    <button onclick="exportFamilyTree()" style="padding:12px;border-radius:var(--r2);border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer;display:flex;align-items:center;gap:8px">📤 ייצוא העץ לקובץ</button>
+    <button onclick="document.getElementById('treeImportFileInp').click()" style="padding:12px;border-radius:var(--r2);border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer;display:flex;align-items:center;gap:8px">📥 ייבוא מקובץ</button>
+    <button onclick="pullTreeFromFamilies()" style="padding:12px;border-radius:var(--r2);border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer;display:flex;align-items:center;gap:8px">🔄 משוך נתונים מהמשפחות</button>
+    <div style="font-size:11px;color:var(--text2);padding:2px 2px 4px;text-align:center">המשיכה מוסיפה בלבד — לא מוחקת ולא דורסת אף אחד שכבר בעץ</div>
+    <button onclick="closeTreeToolsModal()" style="margin-top:4px;padding:10px;border-radius:var(--r2);border:none;background:var(--surface2);color:var(--text2);font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer">סגור</button>
   </div>
 </div>
 
