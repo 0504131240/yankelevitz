@@ -2077,7 +2077,17 @@ function _treeLayoutComponent(people){
         // _freshAnchorSeq) rather than sharing a bare `[]` with every other
         // fresh anchor. It can't itself be ordered by a path through its
         // many children, but its own parents still deserve one.
-        pathOf.set(u,[-(++_freshAnchorSeq)]);
+        //
+        // When two fresh anchors DO end up compared against each other —
+        // two families that only meet through a single marriage somewhere
+        // below, each side prolific enough to anchor itself independently
+        // — the tree's own root family (TREE_ROOT_SURNAME, the "home" side
+        // this whole app is built around) is kept on the right, the same
+        // side a blood descendant of it already gets via bloodGender in
+        // _buildFamilyTreeEntry, regardless of which specific person's own
+        // gender happens to be the one who married across into it.
+        const isRootSide=u.ids.some(id=>byId.get(id)?.surname===TREE_ROOT_SURNAME);
+        pathOf.set(u,[(isRootSide?1:-1)*(1000+(++_freshAnchorSeq))]);
       }));
     }
     // Center on the SPAN of children (midpoint of min/max x), not their
