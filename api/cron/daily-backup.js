@@ -31,10 +31,18 @@ async function sendBirthdayReminders(db, data) {
   // no live browser to drive the client's own EmailJS call, so it needs the
   // same publicKey/serviceId/templateId mirrored server-side
   // (settings/emailjs) that sendWeeklyDebtReminders already relies on.
-  const emailSlots = new Set();
+  // Email and push are independent: a slot gets the email if it checked
+  // birthdays, and its devices are dropped from push only if it also chose
+  // "no push" (pref.push !== true — older prefs predate the choice and were
+  // always email-instead-of-push).
+  const emailSlots = new Set(), pushOffSlots = new Set();
   (data.families || []).forEach(f => {
     if (!f.notifEmailPref) return;
-    [1, 2].forEach(slot => { if (f.notifEmailPref[slot]?.cats?.birthday) emailSlots.add(f.id + ':' + slot); });
+    [1, 2].forEach(slot => {
+      const pref = f.notifEmailPref[slot]; if (!pref) return;
+      if (pref.cats?.birthday) emailSlots.add(f.id + ':' + slot);
+      if (pref.push !== true) pushOffSlots.add(f.id + ':' + slot);
+    });
   });
   const ejsSnap = emailSlots.size ? await db.doc('settings/emailjs').get() : null;
   const ejsCreds = ejsSnap?.exists ? ejsSnap.data() : null;
@@ -49,7 +57,7 @@ async function sendBirthdayReminders(db, data) {
   const groups = { admin: [], index: [] };
   tokenDocs.forEach(d => {
     const t = d.data();
-    if (t.page !== 'admin' && t.famId != null && t.slot != null && emailSlots.has(t.famId + ':' + t.slot)) return;
+    if (t.page !== 'admin' && t.famId != null && t.slot != null && pushOffSlots.has(t.famId + ':' + t.slot)) return;
     groups[t.page === 'admin' ? 'admin' : 'index'].push(d);
   });
 

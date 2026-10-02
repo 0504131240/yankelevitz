@@ -96,8 +96,14 @@ async function dedupeTokenDocs(docs) {
 // not about this family's own events, per relatedFamIds). Only ever applied
 // to family-page ('index') devices — admin devices always get everything,
 // regardless of what's stored in their own notifPref field.
-function notifPrefAllows(pref, kind, relatedFamIds, famId) {
+function notifPrefAllows(pref, kind, relatedFamIds, famId, moneyPush) {
   const p = pref || 'all';
+  // Money moving in/out of a shared fund: the families it's about always get
+  // it; anyone else only if this device opted in (💰 in the 🔔 picker).
+  if (kind === 'money') {
+    if (Array.isArray(relatedFamIds) && famId != null && relatedFamIds.includes(famId)) return true;
+    return moneyPush === true;
+  }
   if (p === 'all') return true;
   if (kind === 'chat' || kind === 'poll') return false;
   if (p === 'important') return true;

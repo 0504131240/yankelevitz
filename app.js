@@ -3118,7 +3118,7 @@ async function registerFCMToken(){
   // there is exactly as much an admin as one using the dedicated admin.html
   // icon, so target:'admin' pushes (see _refreshAdminPushFlag) need to
   // reach them too, not just page==='admin' devices.
-  await setDoc(doc(db,'fcmTokens',did),{token,ts:Date.now(),page:_isAdminPage()?'admin':'index',isAdmin:editMode||_isAdminPage(),famId:_isAdminPage()?null:_myFamId(),slot:_isAdminPage()?null:parseInt(localStorage.getItem('deviceEmailSlot3')||'1'),name:_fcmRegistrantName(),notifPref:localStorage.getItem('notifPref')||'all'});
+  await setDoc(doc(db,'fcmTokens',did),{token,ts:Date.now(),page:_isAdminPage()?'admin':'index',isAdmin:editMode||_isAdminPage(),famId:_isAdminPage()?null:_myFamId(),slot:_isAdminPage()?null:parseInt(localStorage.getItem('deviceEmailSlot3')||'1'),name:_fcmRegistrantName(),notifPref:localStorage.getItem('notifPref')||'all',moneyPush:localStorage.getItem('notifMoney')==='1'});
   // If this exact push token is already registered under a different device
   // id (e.g. site data was cleared so a new fcmDeviceId got generated, but
   // the browser's underlying push subscription — and therefore the token —
@@ -3216,8 +3216,23 @@ function renderNotifPrefModal(){
     <button onclick="saveNotifPref('${p.id}')" style="width:100%;text-align:right;display:block;padding:12px 14px;margin-bottom:10px;border-radius:var(--r2);border:1.5px solid ${p.id===cur?'var(--blue-mid)':'var(--border)'};background:var(--surface2);cursor:pointer;font-family:var(--font)">
       <div style="font-size:14px;font-weight:700;color:var(--text)">${p.ico} ${p.title}${p.id===cur?' ✓':''}</div>
       <div style="font-size:12px;color:var(--text2);margin-top:4px;line-height:1.5">${esc(p.desc)}</div>
-    </button>`).join('')+'<div id="notifEmailSection"></div>';
+    </button>`).join('')
+    +(_isAdminPage()?'':`<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:4px 2px 2px">
+      <input type="checkbox" ${localStorage.getItem('notifMoney')==='1'?'checked':''} onchange="saveNotifMoney(this.checked)" style="margin-top:3px">
+      <span><span style="font-size:13px;font-weight:700;color:var(--text)">💰 גם תנועות כסף של משפחות אחרות</span>
+      <span style="display:block;font-size:11px;color:var(--text2);line-height:1.5;margin-top:2px">פוש על הפקדות ותשלומים לקופות מטרה, ועל העברות מהקופה למשפחה או לארנק. על קופות של אירועים שאתם משתתפים בהם תקבלו ממילא.</span></span>
+    </label>`)
+    +'<div id="notifEmailSection"></div>';
   renderNotifEmailSection();
+}
+async function saveNotifMoney(on){
+  localStorage.setItem('notifMoney',on?'1':'0');
+  try{
+    const {db,doc,setDoc}=await fbInit();
+    const did=localStorage.getItem('fcmDeviceId');
+    if(did) await setDoc(doc(db,'fcmTokens',did),{moneyPush:!!on},{merge:true});
+  }catch(e){console.warn('saveNotifMoney failed:',e);}
+  showToast('✓ ההעדפה נשמרה',2000);
 }
 async function saveNotifPref(pref){
   localStorage.setItem('notifPref',pref);
@@ -3230,13 +3245,10 @@ async function saveNotifPref(pref){
   showToast('✓ ההעדפה נשמרה',2000);
 }
 
-// A family-wide (not per-device, unlike NOTIF_PREFS above) choice to swap
-// push for email on specific notification kinds — for a family that just
-// doesn't want the app pushing to their phone at all, but still wants to
-// know when a poll opens or someone's birthday comes up. Turning it on
-// takes this family's devices OUT of push entirely (see addNotif's
-// exclusion logic) — categories left unchecked below get neither push nor
-// email, which the copy under the toggle spells out.
+// Per registered email (family+slot), on top of the device push picker
+// above: which kinds also arrive by email. Push keeps working alongside
+// unless that address also chose "🔕 רק מייל" (pref.push!==true — prefs
+// saved before this choice existed were always email-instead-of-push).
 const NOTIF_EMAIL_CATS=[
   {id:'poll',ico:'🗳',label:'סקר חדש'},
   {id:'birthday',ico:'🎂',label:'ימי הולדת, יארצייט ויום נישואין'},
@@ -3244,7 +3256,10 @@ const NOTIF_EMAIL_CATS=[
   {id:'event',ico:'📅',label:'אירוע חדש או סגירת אירוע'},
   {id:'goalFund',ico:'🎯',label:'קופה חדשה למטרה'},
   {id:'siteUpdate',ico:'🆕',label:'עדכון או תכונה חדשה באתר'},
+  {id:'money',ico:'💰',label:'תנועות כסף בקופות (הפקדות, תשלומים והעברות)',def:false},
 ];
+// Unset categories fall back to their default: on, except opt-in ones (def:false).
+const _notifEmailCatOn=(pref,id)=>{ const v=pref?.cats?.[id]; if(v!==undefined)return !!v; return (NOTIF_EMAIL_CATS.find(c=>c.id===id)||{}).def!==false; };
 // Only these kinds are ever scoped to a specific family (relatedFamIds) —
 // a poll, a birthday, a family-edit or a new goal fund aren't "about" any
 // one family the way an event/expense is, so there's no sensible "רק שלי"
@@ -3272,20 +3287,25 @@ function renderNotifEmailSection(){
   const myEmail=slot===2?f.email2:f.email;
   const pref=f.notifEmailPref?.[slot];
   const on=!!pref;
-  const cats=pref?.cats||{};
   const scopes=pref?.scopes||{};
+  // Older prefs have no `push` key — they were always email-instead-of-push.
+  const pushOn=pref?.push===true;
   el.innerHTML=`<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
       <input type="checkbox" ${on?'checked':''} onchange="toggleNotifEmailMode(this.checked)">
-      <span style="font-size:13px;font-weight:700;color:var(--text)">📧 קבל התראות למייל במקום פוש${myEmail?' — '+esc(myEmail):''}</span>
+      <span style="font-size:13px;font-weight:700;color:var(--text)">📧 קבל התראות גם במייל${myEmail?' — '+esc(myEmail):''}</span>
     </label>
-    <div style="font-size:11px;color:var(--text2);margin:4px 0 10px;line-height:1.5">כשזה פעיל, המכשיר הזה מפסיק לקבל פושים — ותקבלו במייל רק את מה שמסומן למטה (מה שלא מסומן, לא יגיע בכלל). ליד קטגוריות שקשורות לאירוע ספציפי אפשר גם לבחור "הכל" או "רק שלי". ההגדרה הזו חלה רק על הכתובת שלכם${myEmail?' ('+esc(myEmail)+')':''} — לא על שאר בני המשפחה.</div>
+    <div style="font-size:11px;color:var(--text2);margin:4px 0 10px;line-height:1.5">תקבלו במייל את מה שמסומן למטה. ליד קטגוריות שקשורות לאירוע ספציפי אפשר גם לבחור "הכל" או "רק שלי". ההגדרה חלה רק על הכתובת שלכם${myEmail?' ('+esc(myEmail)+')':''} — לא על שאר בני המשפחה.</div>
     <div style="display:${on?'flex':'none'};flex-direction:column;gap:8px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);padding-bottom:8px;border-bottom:1px dashed var(--border)">
+        <input type="checkbox" ${pushOn?'':'checked'} onchange="toggleNotifEmailPush(!this.checked)">
+        <span style="flex:1">🔕 רק מייל — בלי פושים במכשירים של הכתובת הזו</span>
+      </label>
       ${NOTIF_EMAIL_CATS.map(c=>{
         const scoped=NOTIF_EMAIL_SCOPED_CATS.has(c.id);
         const scope=scopes[c.id]==='mine'?'mine':'all';
         return`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text)">
-          <input type="checkbox" ${cats[c.id]!==false?'checked':''} onchange="toggleNotifEmailCat('${c.id}',this.checked)">
+          <input type="checkbox" ${_notifEmailCatOn(pref,c.id)?'checked':''} onchange="toggleNotifEmailCat('${c.id}',this.checked)">
           <span style="flex:1">${c.ico} ${c.label}</span>
           ${scoped?`<button type="button" onclick="event.preventDefault();event.stopPropagation();toggleNotifEmailScope('${c.id}')" style="border:1.5px solid var(--border);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;font-family:var(--font);cursor:pointer;flex-shrink:0;background:${scope==='mine'?'var(--blue-bg)':'var(--surface2)'};color:${scope==='mine'?'var(--blue)':'var(--text2)'}">${scope==='mine'?'רק שלי':'הכל'}</button>`:''}
         </label>`;
@@ -3299,13 +3319,21 @@ function toggleNotifEmailMode(on){
   if(!f||!slot)return;
   if(on){
     if(!f.notifEmailPref)f.notifEmailPref={};
-    if(!f.notifEmailPref[slot])f.notifEmailPref[slot]={cats:Object.fromEntries(NOTIF_EMAIL_CATS.map(c=>[c.id,true])),scopes:{}};
+    if(!f.notifEmailPref[slot])f.notifEmailPref[slot]={cats:Object.fromEntries(NOTIF_EMAIL_CATS.map(c=>[c.id,c.def!==false])),scopes:{},push:true};
   }else if(f.notifEmailPref){
     delete f.notifEmailPref[slot];
     if(!Object.keys(f.notifEmailPref).length)f.notifEmailPref=null;
   }
   save();renderNotifEmailSection();
   showToast('✓ ההעדפה נשמרה',2000);
+}
+function toggleNotifEmailPush(on){
+  const fid=_myFamId();const f=fid!=null?getFam(fid):null;
+  const slot=_myEmailSlot();
+  const pref=(f&&slot)?f.notifEmailPref?.[slot]:null;if(!pref)return;
+  pref.push=!!on;
+  save();
+  showToast('✓ ההעדפה נשמרה',1500);
 }
 function toggleNotifEmailCat(catId,on){
   const fid=_myFamId();const f=fid!=null?getFam(fid):null;
@@ -5011,7 +5039,7 @@ function payToPot(evId,famId,amt){
   if(!ev.potPayments)ev.potPayments=[];
   ev.potPayments.push({famId,amt:payment});
   const _pf=getFam(famId);
-  addNotif('💰',(_pf?_pf.name.replace('משפחת','').trim():'')+' הפקיד/ה ₪'+payment.toLocaleString()+' לקופת "'+ev.name+'"',undefined,_hideFromAllBut(ev.participants),'deposit',ev.participants);
+  _notifMoney('💰',(_pf?_pf.name.replace('משפחת','').trim():'')+' הפקיד/ה ₪'+payment.toLocaleString()+' לקופת "'+ev.name+'"',ev.participants,_hideFromAllBut(ev.participants),[]);
   save();render();
   if(ev.closed){const nb=evAdjBalance(ev)[famId]||0;if(nb>=-0.5)_sendCloseEvEmailOne(ev,famId);}
 }
@@ -5072,6 +5100,15 @@ function calcPotExcessByFamily(ev){
   });
   return result;
 }
+// One bell/push/email entry per family that received money out of an event
+// pot (to settle what they're owed, or into their wallet).
+function _notifPotPaidOut(ev,amtByFid,toFund){
+  Object.entries(amtByFid).forEach(([fid,amt])=>{
+    if(amt<=0.5)return;
+    const f=getFam(+fid);if(!f)return;
+    _notifMoney('💸','מקופת "'+ev.name+'" הועברו ₪'+Math.round(amt).toLocaleString()+' ל'+f.name.replace('משפחת','').trim()+(toFund?' (לארנק)':''),ev.participants,_hideFromAllBut(ev.participants),[]);
+  });
+}
 function releasePot(evId){
   const ev=events.find(e=>e.id===evId);if(!ev)return;
   const pots=evEffectivePotPayments(ev);if(!pots.length)return;
@@ -5090,9 +5127,12 @@ function releasePot(evId){
     });
   } else {
     if(!ev.settled)ev.settled=[];
+    const _paid={};
     calcPotTransfers(ev).forEach(t=>{
       ev.settled.push({from:t.from,fromFid:t.fromFid,to:t.to,toFid:t.toFid,amt:t.amt,method:'pot'});
+      if(t.fromFid!==t.toFid)_paid[t.toFid]=(_paid[t.toFid]||0)+t.amt;
     });
+    _notifPotPaidOut(ev,_paid,false);
   }
   ev.potPayments=[];
   save();render();
@@ -5130,6 +5170,7 @@ function releasePotToOne(evId,creditorFid,toFund){
       desc:'מקופת אירוע · '+ev.name+' → '+famName,
       date:new Date().toLocaleDateString('he-IL')});
   }
+  _notifPotPaidOut(ev,{[creditorFid]:totalAmt},toFund);
   const potMap={};
   ev.potPayments.forEach(p=>{potMap[p.famId]=(potMap[p.famId]||0)+p.amt;});
   transfers.forEach(t=>{potMap[t.fromFid]=(potMap[t.fromFid]||0)-t.amt;});
@@ -5170,6 +5211,7 @@ function releasePotManual(evId,creditorFid,amt,toFund){
   });
   const given=amt-rem;
   if(given<=0.5)return;
+  _notifPotPaidOut(ev,{[creditorFid]:given},toFund);
   if(toFund){
     const key=String(creditorFid);
     fund.famBalances[key]=(fund.famBalances[key]||0)+given;
@@ -7114,19 +7156,21 @@ function _hideFromAllBut(keepVisibleFor,extraHidden){
   families.forEach(f=>{if(!keep.has(f.id))hidden.add(f.id);});
   return[...hidden];
 }
-// Each registered email (family+slot) with the 📧 "email instead of push"
-// toggle on (see notifEmailSection in the notifPrefModal) is fully out of
-// push from here on — regardless of whether THIS notification's kind is one
-// they picked — so "famId:slot" strings for those are returned for addNotif
-// to pass along as a separate excludeSlots list (kept apart from the
-// family-wide excludeFamIds/hiddenFromFamIds mechanism, which still needs to
-// exclude a whole family regardless of which slot). Among those, only the
-// slots that actually checked this specific kind get an email for it; an
-// unrecognized/missing kind (calls that don't pass one) never emails anyone,
-// same as an unchecked category. For the kinds in NOTIF_EMAIL_SCOPED_CATS a
-// slot can further narrow that to "רק שלי" — only when their family is in
-// this notification's own relatedFamIds — same relatedFamIds the push
-// side's 'mine' tier already filters by.
+// Money moving into or out of a shared fund (event pot, goal fund). It's in
+// the bell for everyone not in hiddenFrom; push goes to relatedFamIds plus
+// any device that opted into 💰; email to whoever checked the 💰 category,
+// except directEmailed families who already get their own confirmation.
+function _notifMoney(icon,text,relatedFamIds,hiddenFrom,directEmailed){
+  addNotif(icon,text,undefined,hiddenFrom,'money',relatedFamIds,directEmailed);
+}
+// A goal fund's own hide list (e.g. the family a surprise gift is for).
+const _goalHidden=g=>(g.hiddenFrom||[]).filter(id=>id!=null);
+// Emails this notification to every registered email (family+slot) that
+// checked its kind (see notifEmailSection). Returns the "famId:slot" strings
+// of addresses that chose email-only, for addNotif to drop from push. An
+// unrecognized/missing kind never emails anyone. For NOTIF_EMAIL_SCOPED_CATS
+// a slot can narrow to "רק שלי" — only when their family is in this
+// notification's relatedFamIds.
 function _sendCategoryEmails(icon,text,kind,hiddenFromFamIds,relatedFamIds,excludeEmailFamIds){
   // A family editing their own info is admin-only news (see addNotif's
   // pushTarget:'admin' calls) — never emailed out to other families, even
@@ -7151,10 +7195,10 @@ function _sendCategoryEmails(icon,text,kind,hiddenFromFamIds,relatedFamIds,exclu
     if(!f.notifEmailPref)return;
     [1,2].forEach(slot=>{
       const pref=f.notifEmailPref[slot];if(!pref)return;
-      optedOutSlots.push(f.id+':'+slot);
+      if(pref.push!==true)optedOutSlots.push(f.id+':'+slot);
       if(hidden.has(f.id))return;
       if(excludedFromEmail.has(f.id))return;
-      if(!kind||!pref.cats[kind])return;
+      if(!kind||!_notifEmailCatOn(pref,kind))return;
       if(NOTIF_EMAIL_SCOPED_CATS.has(kind)&&pref.scopes?.[kind]==='mine'){
         if(!Array.isArray(relatedFamIds)||!relatedFamIds.includes(f.id))return;
       }
@@ -7847,7 +7891,7 @@ function confirmGoalDeposit(){
   // duplicate to worry about.
   const giftInfo=g.gift?(' — מתנה: '+g.gift+(g.recipient?' עבור '+g.recipient:'')):'';
   const walletNote=_goalDepositFromFund?' (מהארנק)':'';
-  addNotif('🎯',depName+' הפקיד/ה ₪'+Math.round(amt).toLocaleString()+' לקופת "'+g.name+'"'+walletNote+giftInfo,undefined,_hideFromAllBut([_goalDepositFamId],g.hiddenFrom),'deposit',[_goalDepositFamId]);
+  _notifMoney('🎯',depName+' הפקיד/ה ₪'+Math.round(amt).toLocaleString()+' לקופת "'+g.name+'"'+walletNote+giftInfo,[_goalDepositFamId],_goalHidden(g),[_goalDepositFamId]);
   sendGoalDepositEmail(_goalDepositFamId,amt,g,_goalDepositFromFund);
   closeGoalDepositSheet();
   save();render();
@@ -8075,7 +8119,7 @@ function toggleGoalPaid(famId){
     const f=getFam(famId);
     const name=f?f.name.replace('משפחת','').trim():'';
     const giftInfo=g.gift?(' — מתנה: '+g.gift+(g.recipient?' עבור '+g.recipient:'')):'';
-    addNotif('🎯',name+' סומן/ה כמי ששילם/ה עבור "'+g.name+'"'+giftInfo,undefined,_hideFromAllBut([famId],g.hiddenFrom),'deposit',[famId]);
+    _notifMoney('🎯',name+' שילם/ה עבור "'+g.name+'"'+giftInfo,[famId],_goalHidden(g),[famId]);
     sendGoalDepositEmail(famId,addedAmt,g,false);
   }
 }
@@ -8125,7 +8169,7 @@ function confirmGoalPayout(){
     date:new Date().toLocaleDateString('he-IL')});
   g.transferred=true;
   g.transferredAmt=amt;
-  addNotif('💰',name+' קיבל/ה ₪'+amt.toLocaleString()+' לארנק מקופת "'+g.name+'"',undefined,_hideFromAllBut([g.boughtBy],g.hiddenFrom),'deposit',[g.boughtBy]);
+  _notifMoney('💸',name+' קיבל/ה ₪'+amt.toLocaleString()+' לארנק מקופת "'+g.name+'"',[g.boughtBy],_goalHidden(g),[g.boughtBy]);
   sendGoalPayoutEmail(g.boughtBy,amt,g);
   save();render();
   renderGoalPayModal();
@@ -9655,6 +9699,8 @@ function doDepositToCumPot(){
       date:new Date().toLocaleDateString('he-IL')});
   }
   ev.potPayments.push({famId:savedFamId,amt:roundAmt,fromFund});
+  const _cpName=(getFam(savedFamId)||{}).name?.replace('משפחת','').trim()||'';
+  _notifMoney('💰',_cpName+' הפקיד/ה ₪'+Math.round(roundAmt).toLocaleString()+' לקופת "'+ev.name+'"'+(fromFund?' (מהארנק)':''),ev.participants,_hideFromAllBut(ev.participants),[savedFamId]);
   closeCumPot();
   save();render();
   const _potF=getFam(savedFamId);

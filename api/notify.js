@@ -64,7 +64,7 @@ module.exports = async (req, res) => {
     if (data.famId != null && data.slot != null && excludeSlotSet.has(data.famId + ':' + data.slot)) return;
     // A family device's own notifPref only ever filters family-page pushes —
     // the admin device always gets everything.
-    if (page === 'index' && !notifPrefAllows(data.notifPref, kind, relatedFamIds, data.famId)) return;
+    if (page === 'index' && !notifPrefAllows(data.notifPref, kind, relatedFamIds, data.famId, data.moneyPush)) return;
     groups[page].push(d);
   });
 
