@@ -5299,27 +5299,17 @@ function renderArchive(){
   }).join('');
 }
 function renderFamilies(){
-  // Sub-families (a kid's own spouse+grandkids household) don't get a
-  // top-level card of their own — that would read as a bogus independent
-  // family — they're nested as a small row inside the real family's card
-  // they grew out of instead (see createKidSubFamily).
+  // Sub-families (a kid's own spouse+grandkids household) don't get a card
+  // of their own here — they're listed inside their parents' family card
+  // (openFamDetail) instead (see createKidSubFamily).
   const html=families.filter(f=>!f.subFamily).map(f=>{
     const cl=col(f.id);const cnt=events.filter(e=>e.participants.includes(f.id)).length;
-    const subFams=families.filter(sf=>sf.subFamily&&sf.parentFamilyId===f.id);
-    const subRows=subFams.length?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px">
-      ${subFams.map(sf=>`<div onclick="event.stopPropagation();openFamEditSheet(${sf.id})" style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        ${famAva(sf,24)}
-        <span style="font-size:12px;font-weight:600;flex:1">💍 ${esc(sf.name)}</span>
-        ${_canEditFam(sf)?'<span style="font-size:11px;color:var(--text3)">✏️ ערוך</span>':''}
-      </div>`).join('')}
-    </div>`:'';
     return`<div class="fcard" onclick="openFamDetail(${f.id})" style="cursor:pointer;flex-direction:column;align-items:stretch">
       <div style="display:flex;align-items:center;gap:10px">
         ${famAva(f, 38)}
         <div style="flex:1"><div class="fname">${esc(f.name)}</div><div class="fevents">${cnt} אירועים${f.children?' · '+f.children+' ילדים':''}<span class="edit-only">${(()=>{const v=new Set(JSON.parse(localStorage.getItem('verifiedEmails')||'[]'));const hasEmail=f.email||f.email2;const allOk=(f.email?v.has(f.email):true)&&(f.email2?v.has(f.email2):true);return hasEmail?(allOk?' · ✅':'· 📧'):'';})()}</span></div></div>
         ${(editMode||f.id===_myFamId())?`<button class="action-btn" onclick="event.stopPropagation();openFamEditSheet(${f.id})">✏️ ערוך</button>`:''}
       </div>
-      ${subRows}
     </div>`;
   }).join('');
   // Rendered into both the admin "ניהול משפחות" tab list and the
@@ -5659,9 +5649,26 @@ function _renderPersonPhoneSection(f,slot){
   el.innerHTML=`<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">📞 טלפון כשר לשיחות התראה (אופציונלי)</div>
     <input type="tel" id="personKosherPhone" inputmode="tel" autocomplete="tel" placeholder="מספר טלפון, למשל 0527123456" value="${esc(cur?.phone||'')}"
       style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 12px;font-size:14px;font-family:var(--font);background:var(--bg);color:var(--text);box-sizing:border-box;direction:ltr;text-align:right">
-    <div style="font-size:11px;color:var(--text2);line-height:1.5;margin:6px 0 8px">מה שמסומן יגיע בשיחה מוקראת למספר הזה. אין שיחות בשבת ובחג, ושיחות שנוצרו בלילה (22:00–08:00) מגיעות בבוקר.</div>
-    <div id="personPhoneCats" style="display:flex;flex-direction:column;gap:6px">${PHONE_CATS.map(c=>`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text)"><input type="checkbox" data-cat="${c.id}" ${on(c)?'checked':''}><span>${c.ico} ${c.label}</span></label>`).join('')}</div>
+    <button type="button" onclick="openPersonPhoneCats()" style="margin-top:8px;width:100%;display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:var(--r2);border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:13px;font-weight:600;font-family:var(--font);cursor:pointer">
+      <span>🔔 אילו התראות יגיעו בשיחה</span><span id="personPhoneCatsCount" style="color:var(--text2);font-weight:700">${PHONE_CATS.filter(on).length} נבחרו ›</span>
+    </button>
+    <div id="personPhoneCatsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1400;align-items:center;justify-content:center;padding:20px;box-sizing:border-box" onclick="if(event.target===this)closePersonPhoneCats()">
+      <div style="background:var(--surface);border-radius:var(--r);padding:18px;width:100%;max-width:340px;max-height:85vh;overflow-y:auto;box-sizing:border-box">
+        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px">📞 מה יגיע בשיחה</div>
+        <div style="font-size:11px;color:var(--text2);line-height:1.5;margin-bottom:12px">מה שמסומן יגיע בשיחה מוקראת למספר הזה. אין שיחות בשבת ובחג, ושיחות שנוצרו בלילה (22:00–08:00) מגיעות בבוקר.</div>
+        <div id="personPhoneCats" style="display:flex;flex-direction:column;gap:8px">${PHONE_CATS.map(c=>`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text)"><input type="checkbox" data-cat="${c.id}" ${on(c)?'checked':''}><span>${c.ico} ${c.label}</span></label>`).join('')}</div>
+        <button type="button" onclick="closePersonPhoneCats()" style="margin-top:14px;width:100%;padding:10px;border-radius:var(--r2);border:none;background:var(--blue-mid);color:#fff;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer">אישור</button>
+      </div>
+    </div>
     ${editMode?`<button type="button" onclick="testKosherPhoneCall()" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">📞 שיחת בדיקה למספר הזה</button><div id="personPhoneTestStatus" style="font-size:12px;margin-top:6px"></div>`:''}`;
+}
+// The choices only take effect when the parent is saved (savePerson reads
+// #personPhoneCats), same as every other field in the person modal.
+function openPersonPhoneCats(){const m=document.getElementById('personPhoneCatsModal');if(m)m.style.display='flex';}
+function closePersonPhoneCats(){
+  const m=document.getElementById('personPhoneCatsModal');if(m)m.style.display='none';
+  const n=document.querySelectorAll('#personPhoneCats input:checked').length;
+  const c=document.getElementById('personPhoneCatsCount');if(c)c.textContent=n+' נבחרו ›';
 }
 async function testKosherPhoneCall(){
   const st=document.getElementById('personPhoneTestStatus');
@@ -5739,7 +5746,8 @@ function openFamDetail(famId){
   let html=`<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
     ${famAva(f,52)}
     <div>
-      <div style="font-size:17px;font-weight:800;color:var(--text)">משפחת ${esc(name)}</div>
+      <div style="font-size:17px;font-weight:800;color:var(--text)">${f.subFamily?esc(f.name):'משפחת '+esc(name)}</div>
+      ${f.subFamily&&getFam(f.parentFamilyId)?`<div onclick="openFamDetail(${f.parentFamilyId})" style="font-size:12px;color:var(--blue-mid);margin-top:2px;cursor:pointer">💍 מתוך ${esc(getFam(f.parentFamilyId).name)}</div>`:''}
       ${f.children?`<div style="font-size:12px;color:var(--text2);margin-top:2px">👶 ${f.children} ילדים</div>`:'<div style="font-size:12px;color:var(--text3);margin-top:2px">ללא ילדים רשומים</div>'}
     </div>
   </div>`;
@@ -5764,6 +5772,18 @@ function openFamDetail(famId){
           <span style="font-size:12px;color:var(--text2)">${dateTxt||'אין תאריך לידה'}${ageBadge}</span>
         </div>`;
       }).join('')}
+    </div>`;
+  }
+
+  // משפחות הילדים הנשואים
+  const subFams=families.filter(sf=>sf.subFamily&&sf.parentFamilyId===famId);
+  if(subFams.length){
+    html+=`<div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">💍 משפחות הילדים</div>
+      ${subFams.map(sf=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+        <div onclick="openFamDetail(${sf.id})" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">${famAva(sf,24)}<span style="font-size:13px;color:var(--text)">${esc(sf.name)}</span></div>
+        ${_canEditFam(sf)?`<button class="action-btn" onclick="closeFamDetail();openFamEditSheet(${sf.id})">✏️ ערוך</button>`:''}
+      </div>`).join('')}
     </div>`;
   }
 
