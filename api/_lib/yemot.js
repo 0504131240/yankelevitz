@@ -4,13 +4,14 @@
 //
 // Credentials live only in Vercel environment variables, never in Firestore
 // (which the browser can read):
-//   YEMOT_TOKEN        "<system number>:<password>"
-//   YEMOT_TEMPLATE_ID  id of a campaign template in that Yemot system
+//   YEMOT_TOKEN        Yemot API key (or "<system number>:<password>")
+//   YEMOT_TEMPLATE_ID  optional campaign template id; without it Yemot uses
+//                      the system's default template
 //   YEMOT_CALLER_ID    optional approved outgoing caller id
 const API = 'https://www.call2all.co.il/ym/api/';
 
 function yemotConfigured() {
-  return !!(process.env.YEMOT_TOKEN && process.env.YEMOT_TEMPLATE_ID);
+  return !!process.env.YEMOT_TOKEN;
 }
 
 const FINAL = { 'כ': 'ך', 'מ': 'ם', 'נ': 'ן', 'פ': 'ף', 'צ': 'ץ' };
@@ -80,10 +81,10 @@ async function runYemotCalls(entries) {
   Object.entries(byPhone).forEach(([phone, texts]) => { phones[phone] = { text: 'הודעה ממערכת המשפחה. ' + texts.join('. ') }; });
   const params = new URLSearchParams({
     token: process.env.YEMOT_TOKEN,
-    templateId: process.env.YEMOT_TEMPLATE_ID,
     ttsMode: '1',
     phones: JSON.stringify(phones),
   });
+  if (process.env.YEMOT_TEMPLATE_ID) params.set('templateId', process.env.YEMOT_TEMPLATE_ID);
   if (process.env.YEMOT_CALLER_ID) params.set('callerId', process.env.YEMOT_CALLER_ID);
   const resp = await fetch(API + 'RunCampaign?' + params.toString());
   const data = await resp.json().catch(() => ({}));
