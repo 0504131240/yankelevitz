@@ -68,12 +68,12 @@ const goalTotal=g=>Object.values(g.contributions||{}).reduce((s,v)=>s+v,0);
 const col=id=>COLORS[(id-1)%COLORS.length];
 const ini=n=>n.replace('משפחת','').trim().slice(0,2);
 const getFam=id=>families.find(f=>f.id===id);
-// Real families in order, each immediately followed by its own sub-families
-// (a kid's spouse+grandkids household, see createKidSubFamily) — used
-// wherever participants are picked, so a sub-family chip always reads as
-// grouped right under the family it grew out of instead of scattered.
-const _famChipOrder=()=>families.filter(f=>!f.subFamily).flatMap(f=>
-  [f,...families.filter(sf=>sf.subFamily&&sf.parentFamilyId===f.id)]);
+// Families offered as event participants. A sub-family (a married kid's
+// household, see createKidSubFamily) is part of its parents' family, not a
+// participant of its own — it's only listed when editing an older event it
+// already takes part in, right under its parents, so it can still be removed.
+const _famChipOrder=ev=>families.filter(f=>!f.subFamily).flatMap(f=>
+  [f,...families.filter(sf=>sf.subFamily&&sf.parentFamilyId===f.id&&ev&&ev.participants.includes(sf.id))]);
 const _isAdminPage=()=>/(^|\/)admin\.html$/.test(location.pathname);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const evCost=ev=>(ev.totalCost!=null?ev.totalCost:ev.participants.reduce((s,fid)=>s+(ev.expenses[fid]||0),0))+evPotExpTotal(ev);
@@ -4360,7 +4360,7 @@ function renderHome(){
   const famStripEl=document.getElementById('homeFamStrip');
   famStripEl.innerHTML=families.length?`
     <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:10px">👥 משפחות</div>
-    <div class="home-fam-strip">${families.map(f=>{
+    <div class="home-fam-strip">${families.filter(f=>!f.subFamily||Math.round(famNet[f.id]||0)!==0).map(f=>{
       const cl=col(f.id);
       const netRaw=famNet[f.id]||0;
       const net=Math.round(netRaw);
@@ -5804,6 +5804,14 @@ function openFamDetail(famId){
     </div>`;
   }
 
+  // A sub-family has no wallet, funds or events of its own — it's part of
+  // its parents' family (see createKidSubFamily).
+  if(f.subFamily){
+    document.getElementById('famDetailContent').innerHTML=html;
+    document.getElementById('famDetailOverlay').style.display='flex';
+    return;
+  }
+
   // יתרת ארנק
   html+=`<div style="margin-bottom:14px;padding:12px;background:var(--surface2);border-radius:var(--r2);display:flex;justify-content:space-between;align-items:center">
     <span style="font-size:13px;font-weight:600;color:var(--text2)">🏦 ארנק</span>
@@ -6233,9 +6241,9 @@ function delFamFromEdit(){
   save();render();
 }
 // Creates a new "sub-family" — the household a kid formed once married,
-// living as a normal families[] entry (subFamily:true) so it gets event
-// participation, wallet balance and the birthday list for free via the
-// same id-generic machinery every real family uses. Opens the existing
+// kept as a families[] entry (subFamily:true) mainly so its birthdays and
+// anniversary reach the calendar. It's part of its parents' family: no
+// wallet, not an event participant, shown only inside the parents' card. Opens the existing
 // family-edit sheet immediately so the admin can fill in the spouse's
 // name/photo/wedding date/grandkids using the unchanged p1/p2/anniv/kid
 // flow (parent1 = the married-in kid, parent2 = the spouse).
@@ -6264,6 +6272,37 @@ function setSplitMethod(method){
   document.getElementById(ids[method]).classList.add('active');
   updateChildOverrideInputs();
   if(expMode==='total') updateTotalPreview();
+}
+// Married kids' households (sub-families) aren't participants of their own:
+// in a per-person split they're ticked inside their parents' family, and
+// their couple + kids are added to the parents' headcount (the parents pay
+// for them). The married kid is therefore no longer counted among the
+// parents' own kids by default. Saved events keep the summed counts in
+// childOverrides/parentOverrides (so every share calculation already
+// includes them) plus ev.marriedIn {subFamId:{adults,kids}} to know what was
+// added when the event is edited again.
+const _marriedFams=f=>f?families.filter(sf=>sf.subFamily&&sf.parentFamilyId===f.id):[];
+const _marriedHeads=sf=>({adults:2,kids:famAge3PlusChildCount(sf)});
+function _famKidsForSplit(f){
+  if(!f)return 0;
+  if(!f.kids||!f.kids.length)return f.children||0;
+  const marriedKidIds=new Set(_marriedFams(f).map(sf=>sf.parentKidId));
+  return f.kids.filter(k=>{ if(marriedKidIds.has(k.id))return false; const age=kidAge(k);return age==null||age>=3; }).length;
+}
+const _defaultKids=f=>_wantsFamComposition()?_famKidsForSplit(f):(f?.children||0);
+function _formMarried(fid){
+  const out={adults:0,kids:0,map:{}};
+  _marriedFams(getFam(fid)).forEach(sf=>{
+    const c=document.getElementById('fmarried-'+sf.id);if(!c||!c.checked)return;
+    const h=_marriedHeads(sf);out.adults+=h.adults;out.kids+=h.kids;out.map[sf.id]=h;
+  });
+  return out;
+}
+// The family's full headcount for this form: its own parents/kids plus any
+// ticked married households.
+function _formHeads(fid){
+  const m=_formMarried(fid);
+  return {kids:(formChildOverride(fid)??_defaultKids(getFam(fid)))+m.kids,parents:(formParentOverride(fid)??FAM_ADULTS)+m.adults,married:m.map};
 }
 function formChildOverride(fid){
   const inp=document.getElementById('fchild-'+fid);
@@ -6294,8 +6333,14 @@ function updateChildOverrideInputs(){
   const inpStyle='border:none;border-right:1.5px solid var(--border);border-left:1.5px solid var(--border);border-radius:0;width:36px;height:30px;padding:0';
   const stepperWrap='display:flex;align-items:center;border:1.5px solid var(--border);border-radius:var(--r2);overflow:hidden';
   document.getElementById('childOverrideInputs').innerHTML=selected.map(f=>{
-    const valCh=ev&&ev.childOverrides&&ev.childOverrides[f.id]!=null?ev.childOverrides[f.id]:(_wantsFamComposition()?famAge3PlusChildCount(f):(f.children||0));
-    const valPa=ev&&ev.parentOverrides&&ev.parentOverrides[f.id]!=null?ev.parentOverrides[f.id]:FAM_ADULTS;
+    const marr=_marriedFams(f);
+    const was=sf=>ev&&ev.marriedIn&&ev.marriedIn[sf.id];
+    const wasKids=marr.reduce((s,sf)=>s+(was(sf)?.kids||0),0),wasAdults=marr.reduce((s,sf)=>s+(was(sf)?.adults||0),0);
+    const valCh=ev&&ev.childOverrides&&ev.childOverrides[f.id]!=null?Math.max(0,ev.childOverrides[f.id]-wasKids):_defaultKids(f);
+    const valPa=ev&&ev.parentOverrides&&ev.parentOverrides[f.id]!=null?Math.max(0,ev.parentOverrides[f.id]-wasAdults):FAM_ADULTS;
+    const marrHtml=marr.map(sf=>{const h=_marriedHeads(sf);return`<label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:var(--text);cursor:pointer">
+        <input type="checkbox" id="fmarried-${sf.id}" ${was(sf)?'checked':''} onchange="if(expMode==='total')updateTotalPreview();updateChildPickSummary()">
+        <span>💍 ${esc(sf.name)} השתתפו <span style="color:var(--text2)">(+${h.adults+h.kids} נפשות)</span></span></label>`;}).join('');
     return`<div style="margin-bottom:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r2)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         ${famAva(f, 28, 'flex-shrink:0')}
@@ -6317,6 +6362,7 @@ function updateChildOverrideInputs(){
           <button type="button" onclick="stepChild('fchild-${f.id}',1)" style="${btnStyle}">+</button>
         </div>
       </div>
+      ${marrHtml}
     </div>`;
   }).join('');
   updateChildPickSummary();
@@ -6333,8 +6379,8 @@ function updateChildPickSummary(){
   const el=document.getElementById('childPickSummary');if(!el)return;
   const selected=families.filter(f=>{ const c=document.getElementById('chip-'+f.id); return c&&c.classList.contains('on'); });
   if(!selected.length){el.textContent='הגדר הרכב לפי משפחה';return;}
-  const totalCh=selected.reduce((s,f)=>{ const v=formChildOverride(f.id); return s+(v!=null?v:(_wantsFamComposition()?famAge3PlusChildCount(f):(f.children||0))); },0);
-  const totalPa=selected.reduce((s,f)=>{ const v=formParentOverride(f.id); return s+(v!=null?v:FAM_ADULTS); },0);
+  const totalCh=selected.reduce((s,f)=>s+_formHeads(f.id).kids,0);
+  const totalPa=selected.reduce((s,f)=>s+_formHeads(f.id).parents,0);
   el.textContent=`${totalPa} הורים · ${totalCh} ילדים`;
 }
 function openExpensePicker(){
@@ -6400,7 +6446,7 @@ function updateTotalPreview(){
   const selected=families.filter(f=>{ const c=document.getElementById('chip-'+f.id); return c&&c.classList.contains('on'); });
   if(!selected.length||!total){ document.getElementById('totalPreview').innerHTML=''; return; }
   let totalW=0; const w={};
-  selected.forEach(f=>{ w[f.id]=famWeight(f,splitMethod,formChildOverride(f.id),formParentOverride(f.id)); totalW+=w[f.id]; });
+  selected.forEach(f=>{ const h=_formHeads(f.id); w[f.id]=famWeight(f,splitMethod,h.kids,h.parents); totalW+=w[f.id]; });
   document.getElementById('totalPreview').innerHTML=
     '<div style="background:var(--surface2);border-radius:var(--r2);padding:10px 12px">'
     +'<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">'+SPLIT_LABELS[splitMethod]+'</div>'
@@ -6441,7 +6487,7 @@ function editEv(evId){
   document.getElementById('f-name').value=ev.name;
   document.getElementById('f-date').value=ev.dateISO||'';
   ['e-name','e-cost','e-fams'].forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.remove('show'); });
-  document.getElementById('famChips').innerHTML=_famChipOrder().map(f=>
+  document.getElementById('famChips').innerHTML=_famChipOrder(ev).map(f=>
     `<button class="chip ${ev.participants.includes(f.id)?'on':''}" id="chip-${f.id}" onclick="toggleChip(${f.id})">${f.subFamily?'└ ':''}${esc(f.name.replace('משפחת','').trim())}</button>`
   ).join('');
   updateFamPickSummary();
@@ -6585,16 +6631,18 @@ async function doCreate(){
   const totalCost=expMode==='total'?(await _toILS('f-total','fTotalCur')):null;
   const isCumulative=expMode==='cumulative';
   const savingsTotal=Math.round(parseFloat(document.getElementById('f-savings')?.value)||0);
-  const childOverrides={};const parentOverrides={};
+  const childOverrides={};const parentOverrides={};const marriedIn={};
   if(splitMethod!=='equal'||isCumulative) participants.forEach(fid=>{
-    childOverrides[fid]=formChildOverride(fid)??(_wantsFamComposition()?famAge3PlusChildCount(getFam(fid)||{}):(getFam(fid)?.children||0));
-    parentOverrides[fid]=formParentOverride(fid)??FAM_ADULTS;
+    const h=_formHeads(fid);
+    childOverrides[fid]=h.kids;parentOverrides[fid]=h.parents;Object.assign(marriedIn,h.married);
   });
+  const hasMarried=Object.keys(marriedIn).length>0;
   if(editingId!=null){
     const ev=events.find(e=>e.id===editingId);
     if(ev){
       ev.name=name; ev.date=date; if(dateISO)ev.dateISO=dateISO;else delete ev.dateISO; ev.participants=participants; ev.excluded=excluded;
       ev.splitMethod=splitMethod; ev.childOverrides=childOverrides; ev.parentOverrides=parentOverrides;
+      if(hasMarried)ev.marriedIn=marriedIn;else delete ev.marriedIn;
       if(!ev.cumulative){
         ev.totalCost=totalCost;
         if(expMode==='custom'){
@@ -6620,6 +6668,7 @@ async function doCreate(){
   } else {
     const newEv={id:nxtId++,name,date,open:true,closedOn:null,participants,excluded,expenses,totalCost:isCumulative?null:totalCost,splitMethod,childOverrides,parentOverrides};
     if(dateISO)newEv.dateISO=dateISO;
+    if(hasMarried)newEv.marriedIn=marriedIn;
     if(isCumulative){newEv.cumulative=true;newEv.expenseItems=[];newEv.expItemId=0;}
     else if(expMode==='custom'&&formExpenseItems&&formExpenseItems.length){
       let seq=1;
@@ -8472,7 +8521,7 @@ function openDepositSheet(mode){
     <textarea id="depositNote" rows="2" placeholder="הערה (אופציונלי — תופיע גם במייל שיישלח)"
       style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 12px;font-size:13px;font-family:var(--font);background:var(--bg);color:var(--text);margin-bottom:14px;box-sizing:border-box;resize:vertical"></textarea>
     <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">${isDeposit?'מי מפקיד?':'מי מושך?'}</div>
-    ${families.map(f=>{
+    ${families.filter(f=>!f.subFamily||Math.abs(famFundBal(f.id))>0.5).map(f=>{
       const cl=col(f.id);
       const bal=famFundBal(f.id);
       const balColor=bal>0?'var(--green-mid)':bal===0?'var(--text3)':'var(--red-mid)';
