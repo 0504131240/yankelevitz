@@ -3957,6 +3957,14 @@ function _myFamId(){
   const id=localStorage.getItem('deviceFamId3');
   return id?parseInt(id):null;
 }
+// Admin, the family itself, or — for a sub-family — the parents' family it
+// grew out of.
+function _canEditFam(f){
+  if(!f)return false;
+  if(editMode)return true;
+  const me=_myFamId();
+  return me!=null&&(f.id===me||(f.subFamily&&f.parentFamilyId===me));
+}
 // A goal fund created with families picked to keep it a surprise (e.g. a
 // gift) — those specific families see nothing about it anywhere, including
 // in aggregate totals, while everyone else (and always the admin) sees it
@@ -5302,7 +5310,7 @@ function renderFamilies(){
       ${subFams.map(sf=>`<div onclick="event.stopPropagation();openFamEditSheet(${sf.id})" style="display:flex;align-items:center;gap:8px;cursor:pointer">
         ${famAva(sf,24)}
         <span style="font-size:12px;font-weight:600;flex:1">💍 ${esc(sf.name)}</span>
-        <span style="font-size:11px;color:var(--text3)">✏️ ערוך</span>
+        ${_canEditFam(sf)?'<span style="font-size:11px;color:var(--text3)">✏️ ערוך</span>':''}
       </div>`).join('')}
     </div>`:'';
     return`<div class="fcard" onclick="openFamDetail(${f.id})" style="cursor:pointer;flex-direction:column;align-items:stretch">
@@ -5615,6 +5623,7 @@ function clearTreePersonPhoto(){
 }
 function openFamEditSheet(fid){
   const f=families.find(x=>x.id===fid);if(!f)return;
+  if(!_canEditFam(f)){openFamDetail(fid);return;}
   _famEditId=fid;
   document.getElementById('famEditName').value=f.name.replace('משפחת','').trim();
   const cl=col(f.id);
