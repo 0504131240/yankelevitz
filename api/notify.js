@@ -27,6 +27,7 @@ module.exports = async (req, res) => {
     try {
       const snap = await db.doc('appData/familyPayments').get();
       phone = await callOrQueue(db, phoneEntriesFor(snap.data()?.families, kind, { target, excludeFamIds }, body));
+      console.log(`notify: kind=${kind} phone ${JSON.stringify(phone)}`);
     } catch (e) {
       console.error('notify: phone calls failed', e);
     }
