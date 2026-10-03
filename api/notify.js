@@ -11,7 +11,7 @@ const { yemotConfigured, phoneEntriesFor, callOrQueue } = require('./_lib/yemot'
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
-  const { adminPass, title, body, target, excludeFamIds, kind, relatedFamIds, excludeSlots } = req.body || {};
+  const { adminPass, title, body, target, excludeFamIds, kind, relatedFamIds, excludeSlots, noPhone } = req.body || {};
   if (!title || !body) { res.status(400).json({ error: 'title and body required' }); return; }
 
   // No pushes during Shabbat or Yom Tov, regardless of who triggered this or why.
@@ -26,7 +26,7 @@ module.exports = async (req, res) => {
   if (yemotConfigured() && kind) {
     try {
       const snap = await db.doc('appData/familyPayments').get();
-      phone = await callOrQueue(db, phoneEntriesFor(snap.data()?.families, kind, { target, excludeFamIds }, body));
+      phone = await callOrQueue(db, phoneEntriesFor(snap.data()?.families, kind, { target, excludeFamIds, relatedFamIds, noPhone }, body));
       console.log(`notify: kind=${kind} phone ${JSON.stringify(phone)}`);
     } catch (e) {
       console.error('notify: phone calls failed', e);

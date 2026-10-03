@@ -48,16 +48,26 @@ function familyPhones(f) {
   return out;
 }
 
+// The only kinds a kosher phone can be called for (every call rings, so the
+// list is kept short). Enforced here too, since older saved preferences may
+// still have other kinds checked. The weekly debt reminder calls separately.
+// 'deposit' (a family's own wallet) is chosen as 'wallet' and only ever calls
+// the families it's about.
+const PHONE_KINDS = new Set(['poll', 'event', 'goalFund', 'money', 'deposit']);
+const PREF_OF_KIND = { deposit: 'wallet' };
+
 // Every parent phone whose chosen categories include this notification kind.
-function phoneEntriesFor(families, kind, { target, excludeFamIds } = {}, text) {
-  if (!kind || target === 'admin') return [];
+function phoneEntriesFor(families, kind, { target, excludeFamIds, relatedFamIds, noPhone } = {}, text) {
+  if (!PHONE_KINDS.has(kind) || noPhone || target === 'admin') return [];
+  const onlyFor = kind === 'deposit' ? new Set(relatedFamIds || []) : null;
+  const pref = PREF_OF_KIND[kind] || kind;
   const excluded = new Set(excludeFamIds || []);
   const spoken = speakable(text);
   if (!spoken) return [];
   const out = [];
   (families || []).forEach(f => {
-    if (excluded.has(f.id)) return;
-    familyPhones(f).forEach(p => { if (p.cats[kind]) out.push({ phone: p.phone, text: spoken }); });
+    if (excluded.has(f.id) || (onlyFor && !onlyFor.has(f.id))) return;
+    familyPhones(f).forEach(p => { if (p.cats[pref]) out.push({ phone: p.phone, text: spoken }); });
   });
   return out;
 }
