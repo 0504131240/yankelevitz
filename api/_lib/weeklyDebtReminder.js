@@ -3,9 +3,9 @@
 // this project's two cron entries — this file was never invoked on its own
 // schedule, so the reminder silently never went out. Kept as a standalone
 // module, exporting the sendable logic instead of its own HTTP handler.
-const { getMessaging, dedupeTokenDocs, escHtml: _escHtml, sendViaEmailJS } = require('../_lib/firebaseAdmin');
-const { evAdjBalance } = require('../_lib/debtCalc');
-const { familyPhones } = require('../_lib/yemot');
+const { getMessaging, dedupeTokenDocs, escHtml: _escHtml, sendViaEmailJS } = require('./firebaseAdmin');
+const { evAdjBalance } = require('./debtCalc');
+const { familyPhones } = require('./yemot');
 
 function debtEmailContent(famName, debts, totalDebt, credit) {
   const creditLine = credit > 0.5 ? `\n(מתוכם ₪${credit.toLocaleString()} מקוזזים מזיכוי שיש לך באירוע אחר)` : '';

@@ -1,6 +1,9 @@
 // GET /api/backups/event-compare?key=…&q=<part of the event name>
-// Read-only: shows one event as it is now and as it was in each saved
-// daily backup, to see what an edit changed. key must match DIAG_KEY.
+// Shows one event as it is now and as it was in each saved daily backup, to
+// see what an edit changed. key must match DIAG_KEY.
+// With &fixId=<event id>&splitMethod=equal|percapita|weighted it instead sets
+// that event's split method (a one-off repair: editing used to reset a
+// cumulative event to "equal").
 const { getDb } = require('../_lib/firebaseAdmin');
 
 const FIELDS = ['id', 'name', 'date', 'dateISO', 'open', 'cumulative', 'participants', 'excluded', 'totalCost', 'expenses',
@@ -13,6 +16,24 @@ module.exports = async (req, res) => {
   if (!key || req.query.key !== key) { res.status(401).send('unauthorized'); return; }
   const q = String(req.query.q || '');
   const db = getDb();
+  if (req.query.fixId) {
+    const id = parseInt(req.query.fixId, 10);
+    const method = String(req.query.splitMethod || '');
+    if (!['equal', 'percapita', 'weighted'].includes(method)) { res.status(400).send('bad splitMethod'); return; }
+    const ref = db.doc('appData/familyPayments');
+    const out = await db.runTransaction(async tx => {
+      const events = (await tx.get(ref)).data().events || [];
+      const ev = events.find(e => e.id === id);
+      if (!ev) return { error: 'no event ' + id };
+      const before = ev.splitMethod;
+      ev.splitMethod = method;
+      tx.update(ref, { events });
+      return { id, name: ev.name, before, after: method };
+    });
+    console.log('event-fix', JSON.stringify(out));
+    res.status(200).json(out);
+    return;
+  }
   const match = d => ((d && d.events) || []).filter(e => q && String(e.name || '').includes(q)).map(e => ({ ...pick(e), _otherKeys: Object.keys(e).filter(k => !FIELDS.includes(k)) }));
   const live = (await db.doc('appData/familyPayments').get()).data();
   const backups = await db.collection('backups').get();

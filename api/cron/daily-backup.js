@@ -16,7 +16,7 @@
 // the only way that's actually reliable on this plan.
 const { getDb, getMessaging, dedupeTokenDocs, notifPrefAllows, isShabbatNow, isYomTovNow, sendViaEmailJS, notifEmailHtml } = require('../_lib/firebaseAdmin');
 const { allOccasions } = require('../_lib/birthdayCalc');
-const { sendWeeklyDebtReminders } = require('./weekly-debt-reminder');
+const { sendWeeklyDebtReminders } = require('../_lib/weeklyDebtReminder');
 const { flushPhoneQueue } = require('../_lib/yemot');
 
 const BACKUP_RETENTION_DAYS = 30;
