@@ -106,7 +106,12 @@ async function runTzintuk(db, entries) {
     }));
   }
   const params = new URLSearchParams({ token: process.env.YEMOT_TOKEN, phones: Object.keys(byPhone).join(':') });
-  if (process.env.YEMOT_CALLER_ID) params.set('callerId', process.env.YEMOT_CALLER_ID);
+  // From the line's own number, so calling back the number that rang
+  // reaches the family line (api/yemot-ivr.js): YEMOT_CALLER_ID, else the
+  // system number in a "<system>:<password>" token.
+  const sysNum = (/^(0\d{8,9}):/.exec(process.env.YEMOT_TOKEN || '') || [])[1];
+  const callerId = process.env.YEMOT_CALLER_ID || sysNum;
+  if (callerId) params.set('callerId', callerId);
   const resp = await fetch(API + 'RunTzintuk?' + params.toString());
   const data = await resp.json().catch(() => ({}));
   if (data.responseStatus !== 'OK') throw new Error('Yemot RunTzintuk failed: ' + (data.message || resp.status));
