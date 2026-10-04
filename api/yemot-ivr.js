@@ -80,7 +80,13 @@ module.exports = async (req, res) => {
   const bye = (...parts) => send('id_list_message=' + say(...parts) + '&go_to_folder=hangup');
 
   const key = process.env.YEMOT_IVR_KEY;
-  if (!key || values.key !== key) { res.status(401).send('unauthorized'); return; }
+  // Set as api_add_0=key=… in the extension; a key written inside api_link
+  // arrives with Yemot's own "?…" glued on, so that part is dropped.
+  const given = String(Array.isArray(values.key) ? values.key[0] : values.key || '').split('?')[0];
+  if (!key || given !== key) {
+    console.log('yemot-ivr: rejected key; params: ' + Object.keys(values).join(','));
+    res.status(401).send('unauthorized'); return;
+  }
 
   const db = getDb();
   const phone = normalizePhone(values.ApiPhone);
