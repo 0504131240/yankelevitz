@@ -43,7 +43,7 @@ function familyPhones(f) {
   [1, 2].forEach(slot => {
     const e = byslot[slot] || (slot === 1 && f.kosherPhone ? { phone: f.kosherPhone, cats: f.phonePref?.cats } : null);
     const phone = e && normalizePhone(e.phone);
-    if (phone) out.push({ phone, cats: e.cats || {} });
+    if (phone) out.push({ phone, cats: e.cats || {}, scopes: e.scopes || {} });
   });
   return out;
 }
@@ -67,7 +67,13 @@ function phoneEntriesFor(families, kind, { target, excludeFamIds, relatedFamIds,
   const out = [];
   (families || []).forEach(f => {
     if (excluded.has(f.id) || (onlyFor && !onlyFor.has(f.id))) return;
-    familyPhones(f).forEach(p => { if (p.cats[pref]) out.push({ phone: p.phone, text: spoken }); });
+    const related = (relatedFamIds || []).includes(f.id);
+    familyPhones(f).forEach(p => {
+      if (!p.cats[pref]) return;
+      // "רק שלנו": only when the notification is about this family.
+      if (p.scopes[pref] === 'mine' && !related) return;
+      out.push({ phone: p.phone, text: spoken });
+    });
   });
   return out;
 }

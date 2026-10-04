@@ -89,11 +89,11 @@ async function sendBirthdayReminders(db, data) {
       for (const [page, allDocs] of Object.entries(groups)) {
         // A family device's own notifPref ('important'/'mine'/'all') only
         // ever filters family-page pushes — the admin device always gets
-        // everything. Birthdays/anniversaries/yahrzeits are always kind
-        // 'important'; b.famId (when set — yahrzeits have none) is who a
-        // 'mine'-tier device needs to match to still get it.
+        // everything. Birthdays/anniversaries/yahrzeits are kind
+        // 'birthday'; b.famId (when set — yahrzeits have none) is who a
+        // "רק שלנו" device needs to match to still get it.
         const docs = page === 'index'
-          ? allDocs.filter(d => notifPrefAllows(d.data().notifPref, 'important', b.famId != null ? [b.famId] : undefined, d.data().famId))
+          ? allDocs.filter(d => notifPrefAllows(d.data().notifPref, 'birthday', b.famId != null ? [b.famId] : undefined, d.data().famId, undefined, { cats: d.data().pushCats, scopes: d.data().pushScopes }))
           : allDocs;
         if (!docs.length) continue;
         try {

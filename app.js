@@ -3185,7 +3185,7 @@ async function registerFCMToken(){
   // there is exactly as much an admin as one using the dedicated admin.html
   // icon, so target:'admin' pushes (see _refreshAdminPushFlag) need to
   // reach them too, not just page==='admin' devices.
-  await setDoc(doc(db,'fcmTokens',did),{token,ts:Date.now(),page:_isAdminPage()?'admin':'index',isAdmin:editMode||_isAdminPage(),famId:_isAdminPage()?null:_myFamId(),slot:_isAdminPage()?null:parseInt(localStorage.getItem('deviceEmailSlot3')||'1'),name:_fcmRegistrantName(),notifPref:localStorage.getItem('notifPref')||'all',moneyPush:localStorage.getItem('notifMoney')==='1'});
+  await setDoc(doc(db,'fcmTokens',did),{token,ts:Date.now(),page:_isAdminPage()?'admin':'index',isAdmin:editMode||_isAdminPage(),famId:_isAdminPage()?null:_myFamId(),slot:_isAdminPage()?null:parseInt(localStorage.getItem('deviceEmailSlot3')||'1'),name:_fcmRegistrantName(),notifPref:localStorage.getItem('notifPref')||'all',moneyPush:localStorage.getItem('notifMoney')==='1',..._pushPrefDoc()});
   // If this exact push token is already registered under a different device
   // id (e.g. site data was cleared so a new fcmDeviceId got generated, but
   // the browser's underlying push subscription — and therefore the token —
@@ -3229,7 +3229,7 @@ async function requestNotifPerm(){
   if(!('Notification' in window)){alert('הדפדפן שלך לא תומך בהתראות');return;}
   if(Notification.permission==='denied'){alert('הדפדפן חסם התראות. לאיפוס — לחץ על המנעול בסרגל הכתובת.');return;}
   const p=await Notification.requestPermission();
-  renderNotifBtn();
+  renderNotifBtn();renderNotifPrefModal();
   if(p==='granted'){
     showNotif('ינקלביץ 🔔','התראות הופעלו! תקבלו עדכונים על הודעות, הוצאות וימי הולדת.');
     registerFCMToken().then(()=>{}).catch(e=>alert('שגיאת התראות: '+e.message));
@@ -3243,74 +3243,145 @@ function showNotif(title,body,tag){
 
 function renderNotifBtn(){
   const btn=document.getElementById('notifBtn');if(!btn)return;
-  if(!('Notification' in window)){btn.style.display='none';return;}
-  const perm=Notification.permission;
-  btn.textContent=perm==='granted'?'🔔':'🔕';
-  btn.style.opacity=perm==='granted'?'1':'0.55';
-  btn.title=perm==='granted'?'התראות פעילות':'לחץ להפעלת התראות';
-  btn.onclick=perm==='denied'
-    ?()=>alert('הדפדפן חסם התראות. לאיפוס דרך הגדרות האתר בסרגל הכתובת.')
-    :perm==='granted'
-      ?openNotifPrefModal
-      :requestNotifPerm;
+  const granted=_notifOk();
+  btn.textContent=granted?'🔔':'🔕';
+  btn.style.opacity=granted?'1':'0.55';
+  btn.title='הגדרות התראות';
+  btn.onclick=openNotifPrefModal;
 }
-// Lets a family device choose which pushes it actually wants — 'all' (every
-// push, unchanged default), 'important' (skips chat/poll noise) or 'mine'
-// (skips anything not about this family's own events). Falls back to the
-// old plain alert when the picker markup isn't on this page (e.g. admin.html
-// intentionally never gained it — the admin device always gets everything).
-const NOTIF_PREFS=[
-  {id:'all',ico:'🔔',title:'כל מה שזז',desc:'עדכון על כל פעילות באפליקציה — הודעות בצ\'אט, סקרים, אירועים, הוצאות ועוד.'},
-  {id:'important',ico:'📌',title:'עדכונים חשובים',desc:'ימי הולדת, פתיחה/סגירה של אירוע, הוצאות חדשות וכדומה — בלי הודעות צ\'אט וסקרים.'},
-  {id:'mine',ico:'🎯',title:'רק מה שקשור אליי',desc:'רק התראות על אירועים שהמשפחה שלכם משתתפת בהם.'},
+// The 🔔 window: three tabs side by side — push (this device), email (this
+// parent's address) and kosher phone (the family's parents' numbers) — each
+// with its own list of what to get and, where it's about specific families,
+// "הכל / רק שלנו".
+//
+// Push choices are per device: localStorage pushPrefs, mirrored onto the
+// device's fcmTokens doc as pushCats/pushScopes, which api/notify.js
+// (notifPrefAllows) reads. Devices that never opened this window keep their
+// old notifPref tier ('all'/'important'/'mine' + moneyPush), which
+// _pushPrefs translates for display.
+const PUSH_CATS=[
+  {id:'chat',ico:'💬',label:'הודעות בצ\'אט'},
+  {id:'poll',ico:'🗳',label:'סקר חדש'},
+  {id:'birthday',ico:'🎂',label:'ימי הולדת, יארצייט ויום נישואין',scoped:true},
+  {id:'expense',ico:'💳',label:'הוצאה חדשה',scoped:true},
+  {id:'event',ico:'📅',label:'אירוע חדש או סגירת אירוע',scoped:true},
+  {id:'goalFund',ico:'🎯',label:'קופה חדשה למטרה'},
+  {id:'money',ico:'💰',label:'הפקדות ותשלומים בקופות',scoped:true},
+  {id:'wallet',ico:'🏦',label:'הפקדה או משיכה בארנק שלנו'},
+  {id:'siteUpdate',ico:'🆕',label:'עדכון או תכונה חדשה באתר'},
 ];
+function _pushPrefs(){
+  try{const v=JSON.parse(localStorage.getItem('pushPrefs')||'null');if(v&&v.cats)return v;}catch(e){}
+  const tier=localStorage.getItem('notifPref')||'all';
+  const cats={},scopes={};
+  PUSH_CATS.forEach(c=>{
+    cats[c.id]=tier==='all'||(c.id!=='chat'&&c.id!=='poll');
+    if(c.scoped)scopes[c.id]=tier==='mine'?'mine':'all';
+  });
+  if(localStorage.getItem('notifMoney')!=='1')scopes.money='mine';
+  return{cats,scopes};
+}
+const _pushPrefDoc=()=>{const p=_pushPrefs();return{pushCats:p.cats,pushScopes:p.scopes};};
+async function _savePushPrefs(p){
+  localStorage.setItem('pushPrefs',JSON.stringify(p));
+  try{
+    const {db,doc,setDoc}=await fbInit();
+    const did=localStorage.getItem('fcmDeviceId');
+    if(did) await setDoc(doc(db,'fcmTokens',did),{pushCats:p.cats,pushScopes:p.scopes},{merge:true});
+  }catch(e){console.warn('save push prefs failed:',e);}
+  showToast('✓ ההעדפה נשמרה',1500);
+}
+function togglePushCat(id,on){const p=_pushPrefs();p.cats[id]=!!on;_savePushPrefs(p);renderNotifPrefModal();}
+function setPushScope(id,scope){const p=_pushPrefs();if(!p.scopes)p.scopes={};p.scopes[id]=scope;_savePushPrefs(p);renderNotifPrefModal();}
+
+// A labelled on/off switch row.
+const _npSwitch=(checked,onchange,title,sub='')=>`<label class="np-row"><span class="np-row-t">${title}${sub?`<small>${sub}</small>`:''}</span><span class="np-sw"><input type="checkbox" ${checked?'checked':''} onchange="${onchange}"><span></span></span></label>`;
+// One category list. isOn(c)/scopeOf(c) read the current choice; toggle and
+// setScope are the names of global functions, called with extra leading
+// args (e.g. the phone's slot).
+function _npCatList(cats,isOn,scopeOf,toggle,setScope,lead=''){
+  return cats.map(c=>{
+    const on=isOn(c);
+    const scope=scopeOf(c)==='mine'?'mine':'all';
+    return _npSwitch(on,`${toggle}(${lead}'${c.id}',this.checked)`,`${c.ico} ${c.label}`)
+      +(c.scoped&&on?`<div class="np-scope">של מי:
+        <span class="np-seg" role="group"><button type="button" class="${scope==='all'?'on':''}" onclick="${setScope}(${lead}'${c.id}','all')">כולם</button><button type="button" class="${scope==='mine'?'on':''}" onclick="${setScope}(${lead}'${c.id}','mine')">רק שלנו</button></span></div>`:'');
+  }).join('');
+}
+
+let _npTab='push';
 function openNotifPrefModal(){
-  const modal=document.getElementById('notifPrefModal');
-  if(!modal){alert('התראות פעילות. לביטול — הגדרות האתר בסרגל הכתובת.');return;}
+  const modal=document.getElementById('notifPrefModal');if(!modal)return;
   renderNotifPrefModal();
   modal.style.display='flex';
 }
 function closeNotifPrefModal(){
   const modal=document.getElementById('notifPrefModal');if(modal)modal.style.display='none';
 }
+function setNpTab(t){_npTab=t;renderNotifPrefModal();}
+function _myFam(){const fid=_myFamId();return fid!=null?getFam(fid):null;}
 function renderNotifPrefModal(){
   const el=document.getElementById('notifPrefModalContent');if(!el)return;
-  const cur=localStorage.getItem('notifPref')||'all';
-  // The email section is rebuilt as part of the same innerHTML write (not a
-  // pre-existing child) — a separate write would wipe out a static child
-  // element with an id, since this replaces the whole container each time.
-  el.innerHTML=NOTIF_PREFS.map(p=>`
-    <button onclick="saveNotifPref('${p.id}')" style="width:100%;text-align:right;display:block;padding:12px 14px;margin-bottom:10px;border-radius:var(--r2);border:1.5px solid ${p.id===cur?'var(--blue-mid)':'var(--border)'};background:var(--surface2);cursor:pointer;font-family:var(--font)">
-      <div style="font-size:14px;font-weight:700;color:var(--text)">${p.ico} ${p.title}${p.id===cur?' ✓':''}</div>
-      <div style="font-size:12px;color:var(--text2);margin-top:4px;line-height:1.5">${esc(p.desc)}</div>
-    </button>`).join('')
-    +(_isAdminPage()?'':`<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:4px 2px 2px">
-      <input type="checkbox" ${localStorage.getItem('notifMoney')==='1'?'checked':''} onchange="saveNotifMoney(this.checked)" style="margin-top:3px">
-      <span><span style="font-size:13px;font-weight:700;color:var(--text)">💰 גם תנועות כסף של משפחות אחרות</span>
-      <span style="display:block;font-size:11px;color:var(--text2);line-height:1.5;margin-top:2px">פוש על הפקדות ותשלומים לקופות מטרה, ועל העברות מהקופה למשפחה או לארנק. על קופות של אירועים שאתם משתתפים בהם תקבלו ממילא.</span></span>
-    </label>`)
-    +'<div id="notifEmailSection"></div>';
-  renderNotifEmailSection();
+  const f=_myFam(),slot=_myEmailSlot();
+  const emailPref=(f&&slot)?f.notifEmailPref?.[slot]:null;
+  const phones=f?[1,2].map(sl=>({slot:sl,p:_parentPhone(f,sl)})).filter(x=>x.p&&x.p.phone):[];
+  const pushStatus=_notifOk()?PUSH_CATS.filter(c=>_pushPrefs().cats[c.id]).length+' נבחרו':'כבוי';
+  const emailStatus=emailPref?NOTIF_EMAIL_CATS.filter(c=>_notifEmailCatOn(emailPref,c.id)).length+' נבחרו':'כבוי';
+  const phoneStatus=phones.length?phones.length+(phones.length===1?' מספר':' מספרים'):'אין מספר';
+  const tabs=[['push','📱','פוש',pushStatus],['email','📧','מייל',emailStatus],['phone','📞','פלאפון',phoneStatus]];
+  el.innerHTML=`<div class="np-tabs" role="tablist">${tabs.map(([id,ico,label,st])=>`<button type="button" role="tab" aria-selected="${_npTab===id}" class="np-tab${_npTab===id?' on':''}" onclick="setNpTab('${id}')"><span class="np-tab-ico">${ico}</span><span class="np-tab-l">${label}</span><span class="np-tab-s">${st}</span></button>`).join('')}</div>
+    <div class="np-pane">${_npTab==='email'?_npEmailPane(f,slot):_npTab==='phone'?_npPhonePane(f,phones):_npPushPane(f,slot,emailPref)}</div>`;
 }
-async function saveNotifMoney(on){
-  localStorage.setItem('notifMoney',on?'1':'0');
-  try{
-    const {db,doc,setDoc}=await fbInit();
-    const did=localStorage.getItem('fcmDeviceId');
-    if(did) await setDoc(doc(db,'fcmTokens',did),{moneyPush:!!on},{merge:true});
-  }catch(e){console.warn('saveNotifMoney failed:',e);}
-  showToast('✓ ההעדפה נשמרה',2000);
+function _npPushPane(f,slot,emailPref){
+  if(!('Notification' in window))return`<div class="np-empty">הדפדפן הזה לא תומך בהתראות פוש. אפשר לקבל התראות במייל.</div>`;
+  if(Notification.permission==='denied')return`<div class="np-empty">הדפדפן חסם התראות מהאתר. כדי לאפשר: לחצו על המנעול שליד כתובת האתר ← הרשאות ← התראות ← אפשר.</div>`;
+  if(!_notifOk())return`<div class="np-empty">כדי לקבל התראות קופצות בטלפון או במחשב הזה:<button type="button" class="np-cta" onclick="requestNotifPerm()">🔔 הפעל פוש במכשיר הזה</button></div>`;
+  const p=_pushPrefs();
+  // An address that chose "email only" in the old window still blocks push
+  // on all its devices (see _sendCategoryEmails) — say so, with a way out.
+  const emailOnly=emailPref&&emailPref.push!==true;
+  return(emailOnly?`<div class="np-note">הפושים כבויים כי בעבר בחרתם לקבל רק מייל.<button type="button" class="np-cta" onclick="enablePushForEmailSlot()">הפעל פוש</button></div>`:'')
+    +`<div class="np-hint">מה יקפוץ בטלפון או במחשב הזה</div>`
+    +_npCatList(PUSH_CATS,c=>!!p.cats[c.id],c=>p.scopes?.[c.id],'togglePushCat','setPushScope');
 }
-async function saveNotifPref(pref){
-  localStorage.setItem('notifPref',pref);
-  try{
-    const {db,doc,setDoc}=await fbInit();
-    const did=localStorage.getItem('fcmDeviceId');
-    if(did) await setDoc(doc(db,'fcmTokens',did),{notifPref:pref},{merge:true});
-  }catch(e){console.warn('saveNotifPref failed:',e);}
-  renderNotifPrefModal();
-  showToast('✓ ההעדפה נשמרה',2000);
+function enablePushForEmailSlot(){
+  const f=_myFam(),slot=_myEmailSlot();
+  const pref=(f&&slot)?f.notifEmailPref?.[slot]:null;if(!pref)return;
+  pref.push=true;save();renderNotifPrefModal();
+  showToast('✓ הפושים הופעלו',1500);
 }
+function _npEmailPane(f,slot){
+  if(!f||!slot)return`<div class="np-empty">התראות במייל זמינות אחרי כניסה עם המייל של המשפחה.</div>`;
+  const myEmail=slot===2?f.email2:f.email;
+  if(!myEmail)return`<div class="np-empty">אין כתובת מייל רשומה. אפשר להוסיף אותה בעריכת המשפחה.</div>`;
+  const pref=f.notifEmailPref?.[slot];
+  return _npSwitch(!!pref,'toggleNotifEmailMode(this.checked)','📧 קבל התראות במייל',esc(myEmail))
+    +(pref?`<div class="np-sep"></div><div class="np-hint">מה לשלוח במייל</div>`
+      +_npCatList(NOTIF_EMAIL_CATS.map(c=>({...c,scoped:NOTIF_EMAIL_SCOPED_CATS.has(c.id)})),c=>_notifEmailCatOn(pref,c.id),c=>pref.scopes?.[c.id],'toggleNotifEmailCat','setNotifEmailScope')
+      +`<div class="np-foot">ההגדרה חלה רק על הכתובת שלכם, לא על שאר בני המשפחה.</div>`:'');
+}
+function _npPhonePane(f,phones){
+  if(!f)return`<div class="np-empty">שיחות לפלאפון זמינות אחרי כניסה עם המייל של המשפחה.</div>`;
+  if(!phones.length)return`<div class="np-empty">שיחה מוקראת לפלאפון כשר, למי שאין אינטרנט.<br>עדיין לא הוזן מספר. מוסיפים אותו בעריכת המשפחה: לוחצים על ההורה וממלאים "טלפון כשר".</div>`;
+  return phones.map(({slot,p})=>{
+    const name=(slot===2?f.emailName2:f.emailName)||(slot===2?'הורה 2':'הורה 1');
+    const cats=p.cats||{},scopes=p.scopes||{};
+    return`<div class="np-phone"><div class="np-phone-h">📞 ${esc(name)} <span dir="ltr">${esc(p.phone)}</span></div>`
+      +_npCatList(PHONE_CATS,c=>!!cats[c.id],c=>scopes[c.id],'togglePhoneCat','setPhoneScope',slot+',')+`</div>`;
+  }).join('')+`<div class="np-foot">אין שיחות בשבת ובחג. מה שקורה בלילה (22:00–08:00) מגיע בבוקר.</div>`;
+}
+// Server rule (api/_lib/yemot.js): only explicitly checked kinds call.
+function _editMyPhone(slot,fn){
+  const f=_myFam();if(!f)return;
+  const cur=_parentPhone(f,slot);if(!cur)return;
+  const next={phone:cur.phone,cats:{...(cur.cats||{})},scopes:{...(cur.scopes||{})}};
+  fn(next);
+  _setParentPhone(f,slot,next);
+  save();renderNotifPrefModal();
+  showToast('✓ ההעדפה נשמרה',1500);
+}
+function togglePhoneCat(slot,id,on){_editMyPhone(slot,n=>{n.cats[id]=!!on;});}
+function setPhoneScope(slot,id,scope){_editMyPhone(slot,n=>{n.scopes[id]=scope;});}
 
 // Per registered email (family+slot), on top of the device push picker
 // above: which kinds also arrive by email. Push keeps working alongside
@@ -3323,16 +3394,16 @@ const NOTIF_EMAIL_CATS=[
   {id:'event',ico:'📅',label:'אירוע חדש או סגירת אירוע'},
   {id:'goalFund',ico:'🎯',label:'קופה חדשה למטרה'},
   {id:'siteUpdate',ico:'🆕',label:'עדכון או תכונה חדשה באתר'},
-  {id:'money',ico:'💰',label:'תנועות כסף בקופות (הפקדות, תשלומים והעברות)',def:false},
+  {id:'money',ico:'💰',label:'תנועות כסף בקופות',def:false},
 ];
 // Kosher-phone spoken calls (api/_lib/yemot.js, PHONE_KINDS there): a short
 // list, since every one rings. Closing an event and money leaving a fund
 // don't call (addNotif's noPhone), only new events and deposits do.
 const PHONE_CATS=[
   {id:'poll',ico:'🗳',label:'סקר חדש',def:false},
-  {id:'event',ico:'📅',label:'אירוע חדש',def:true},
+  {id:'event',ico:'📅',label:'אירוע חדש',def:true,scoped:true},
   {id:'goalFund',ico:'🎯',label:'קופה חדשה למטרה',def:true},
-  {id:'money',ico:'💰',label:'הפקדת כסף לקופה',def:false},
+  {id:'money',ico:'💰',label:'הפקדת כסף לקופה',def:false,scoped:true},
   {id:'wallet',ico:'🏦',label:'הפקדה או משיכה בארנק שלנו',def:true},
   {id:'debt',ico:'📋',label:'תזכורת שבועית על חוב פתוח',def:true},
 ];
@@ -3357,41 +3428,6 @@ function _myEmailSlot(){
   if(_isAdminPage())return null;
   return parseInt(localStorage.getItem('deviceEmailSlot3')||'1');
 }
-function renderNotifEmailSection(){
-  const el=document.getElementById('notifEmailSection');if(!el)return;
-  const fid=_myFamId();
-  const f=fid!=null?getFam(fid):null;
-  const slot=_myEmailSlot();
-  if(!f||!slot){el.innerHTML='';return;}
-  const myEmail=slot===2?f.email2:f.email;
-  const pref=f.notifEmailPref?.[slot];
-  const on=!!pref;
-  const scopes=pref?.scopes||{};
-  // Older prefs have no `push` key — they were always email-instead-of-push.
-  const pushOn=pref?.push===true;
-  el.innerHTML=`<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
-    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-      <input type="checkbox" ${on?'checked':''} onchange="toggleNotifEmailMode(this.checked)">
-      <span style="font-size:13px;font-weight:700;color:var(--text)">📧 קבל התראות גם במייל${myEmail?' — '+esc(myEmail):''}</span>
-    </label>
-    <div style="font-size:11px;color:var(--text2);margin:4px 0 10px;line-height:1.5">תקבלו במייל את מה שמסומן למטה. ליד קטגוריות שקשורות לאירוע ספציפי אפשר גם לבחור "הכל" או "רק שלי". ההגדרה חלה רק על הכתובת שלכם${myEmail?' ('+esc(myEmail)+')':''} — לא על שאר בני המשפחה.</div>
-    <div style="display:${on?'flex':'none'};flex-direction:column;gap:8px">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);padding-bottom:8px;border-bottom:1px dashed var(--border)">
-        <input type="checkbox" ${pushOn?'':'checked'} onchange="toggleNotifEmailPush(!this.checked)">
-        <span style="flex:1">🔕 רק מייל — בלי פושים במכשירים של הכתובת הזו</span>
-      </label>
-      ${NOTIF_EMAIL_CATS.map(c=>{
-        const scoped=NOTIF_EMAIL_SCOPED_CATS.has(c.id);
-        const scope=scopes[c.id]==='mine'?'mine':'all';
-        return`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text)">
-          <input type="checkbox" ${_notifEmailCatOn(pref,c.id)?'checked':''} onchange="toggleNotifEmailCat('${c.id}',this.checked)">
-          <span style="flex:1">${c.ico} ${c.label}</span>
-          ${scoped?`<button type="button" onclick="event.preventDefault();event.stopPropagation();toggleNotifEmailScope('${c.id}')" style="border:1.5px solid var(--border);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;font-family:var(--font);cursor:pointer;flex-shrink:0;background:${scope==='mine'?'var(--blue-bg)':'var(--surface2)'};color:${scope==='mine'?'var(--blue)':'var(--text2)'}">${scope==='mine'?'רק שלי':'הכל'}</button>`:''}
-        </label>`;
-      }).join('')}
-    </div>
-  </div>`;
-}
 function toggleNotifEmailMode(on){
   const fid=_myFamId();const f=fid!=null?getFam(fid):null;
   const slot=_myEmailSlot();
@@ -3403,33 +3439,25 @@ function toggleNotifEmailMode(on){
     delete f.notifEmailPref[slot];
     if(!Object.keys(f.notifEmailPref).length)f.notifEmailPref=null;
   }
-  save();renderNotifEmailSection();
+  save();renderNotifPrefModal();
   showToast('✓ ההעדפה נשמרה',2000);
-}
-function toggleNotifEmailPush(on){
-  const fid=_myFamId();const f=fid!=null?getFam(fid):null;
-  const slot=_myEmailSlot();
-  const pref=(f&&slot)?f.notifEmailPref?.[slot]:null;if(!pref)return;
-  pref.push=!!on;
-  save();
-  showToast('✓ ההעדפה נשמרה',1500);
 }
 function toggleNotifEmailCat(catId,on){
   const fid=_myFamId();const f=fid!=null?getFam(fid):null;
   const slot=_myEmailSlot();
   const pref=(f&&slot)?f.notifEmailPref?.[slot]:null;if(!pref)return;
   pref.cats[catId]=on;
-  save();
+  save();renderNotifPrefModal();
   showToast('✓ ההעדפה נשמרה',1500);
 }
-function toggleNotifEmailScope(catId){
+function setNotifEmailScope(catId,scope){
   const fid=_myFamId();const f=fid!=null?getFam(fid):null;
   const slot=_myEmailSlot();
   const pref=(f&&slot)?f.notifEmailPref?.[slot]:null;if(!pref)return;
   if(!pref.scopes)pref.scopes={};
-  const cur=pref.scopes[catId]==='mine'?'mine':'all';
-  pref.scopes[catId]=cur==='mine'?'all':'mine';
-  save();renderNotifEmailSection();
+  if((pref.scopes[catId]==='mine'?'mine':'all')===scope)return;
+  pref.scopes[catId]=scope;
+  save();renderNotifPrefModal();
   showToast('✓ ההעדפה נשמרה',1500);
 }
 
@@ -5722,32 +5750,12 @@ function _renderPersonPhoneSection(f,slot){
   if(!el){el=document.createElement('div');el.id='personPhoneSection';el.style.marginBottom='14px';anchor.after(el);}
   if(slot==null){el.style.display='none';el.innerHTML='';return;}
   const cur=_parentPhone(f,slot);
-  const cats=cur?.cats||{};
-  const on=c=>cats[c.id]!==undefined?!!cats[c.id]:c.def;
   el.style.display='block';
   el.innerHTML=`<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">📞 טלפון כשר לשיחות התראה (אופציונלי)</div>
     <input type="tel" id="personKosherPhone" inputmode="tel" autocomplete="tel" placeholder="מספר טלפון, למשל 0527123456" value="${esc(cur?.phone||'')}"
       style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 12px;font-size:14px;font-family:var(--font);background:var(--bg);color:var(--text);box-sizing:border-box;direction:ltr;text-align:right">
-    <button type="button" onclick="openPersonPhoneCats()" style="margin-top:8px;width:100%;display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:var(--r2);border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:13px;font-weight:600;font-family:var(--font);cursor:pointer">
-      <span>🔔 אילו התראות יגיעו בשיחה</span><span id="personPhoneCatsCount" style="color:var(--text2);font-weight:700">${PHONE_CATS.filter(on).length} נבחרו ›</span>
-    </button>
-    <div id="personPhoneCatsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1400;align-items:center;justify-content:center;padding:20px;box-sizing:border-box" onclick="if(event.target===this)closePersonPhoneCats()">
-      <div style="background:var(--surface);border-radius:var(--r);padding:18px;width:100%;max-width:340px;max-height:85vh;overflow-y:auto;box-sizing:border-box">
-        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px">📞 מה יגיע בשיחה</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.5;margin-bottom:12px">מה שמסומן יגיע בשיחה מוקראת למספר הזה. אין שיחות בשבת ובחג, ושיחות שנוצרו בלילה (22:00–08:00) מגיעות בבוקר.</div>
-        <div id="personPhoneCats" style="display:flex;flex-direction:column;gap:8px">${PHONE_CATS.map(c=>`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text)"><input type="checkbox" data-cat="${c.id}" ${on(c)?'checked':''}><span>${c.ico} ${c.label}</span></label>`).join('')}</div>
-        <button type="button" onclick="closePersonPhoneCats()" style="margin-top:14px;width:100%;padding:10px;border-radius:var(--r2);border:none;background:var(--blue-mid);color:#fff;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer">אישור</button>
-      </div>
-    </div>
+    <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.5">מה יגיע בשיחה בוחרים בכפתור ההתראות 🔔 למעלה.</div>
     ${editMode?`<button type="button" onclick="testKosherPhoneCall()" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">📞 שיחת בדיקה למספר הזה</button><div id="personPhoneTestStatus" style="font-size:12px;margin-top:6px"></div>`:''}`;
-}
-// The choices only take effect when the parent is saved (savePerson reads
-// #personPhoneCats), same as every other field in the person modal.
-function openPersonPhoneCats(){const m=document.getElementById('personPhoneCatsModal');if(m)m.style.display='flex';}
-function closePersonPhoneCats(){
-  const m=document.getElementById('personPhoneCatsModal');if(m)m.style.display='none';
-  const n=document.querySelectorAll('#personPhoneCats input:checked').length;
-  const c=document.getElementById('personPhoneCatsCount');if(c)c.textContent=n+' נבחרו ›';
 }
 async function testKosherPhoneCall(){
   const st=document.getElementById('personPhoneTestStatus');
@@ -6159,7 +6167,9 @@ function savePerson(){
     const phoneRaw=(document.getElementById('personKosherPhone')?.value||'').trim();
     const phone=phoneRaw?_normPhone(phoneRaw):null;
     if(phoneRaw&&!phone){alert('מספר הטלפון הכשר לא תקין');return;}
-    _setParentPhone(f,isP1?1:2,phone?{phone,cats:Object.fromEntries([...document.querySelectorAll('#personPhoneCats input[data-cat]')].map(i=>[i.dataset.cat,i.checked]))}:null);
+    // Keep the call choices (set in the 🔔 window); a new number starts on the defaults.
+    const prevPhone=_parentPhone(f,isP1?1:2);
+    _setParentPhone(f,isP1?1:2,phone?{...(prevPhone||{}),phone,cats:prevPhone?.cats||Object.fromEntries(PHONE_CATS.map(c=>[c.id,!!c.def]))}:null);
     const email=_cleanEmail(document.getElementById('personEmail').value)||'';
     const prevEmail=isP1?f.email:f.email2;
     if(isP1){f.email=email;f.emailName=name;}else{f.email2=email;f.emailName2=name;}

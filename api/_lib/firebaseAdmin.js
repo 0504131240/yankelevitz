@@ -96,18 +96,29 @@ async function dedupeTokenDocs(docs) {
 // not about this family's own events, per relatedFamIds). Only ever applied
 // to family-page ('index') devices — admin devices always get everything,
 // regardless of what's stored in their own notifPref field.
-function notifPrefAllows(pref, kind, relatedFamIds, famId, moneyPush) {
+function notifPrefAllows(pref, kind, relatedFamIds, famId, moneyPush, push) {
+  const mine = Array.isArray(relatedFamIds) && famId != null && relatedFamIds.includes(famId);
+  // Per-category choices from the 🔔 window (fcmTokens pushCats/pushScopes).
+  // A kind with no category there (e.g. familyEdit) isn't filtered.
+  if (push && push.cats) {
+    const cat = kind === 'deposit' ? 'wallet' : kind;
+    if (cat && Object.prototype.hasOwnProperty.call(push.cats, cat)) {
+      if (!push.cats[cat]) return false;
+      if (push.scopes && push.scopes[cat] === 'mine') return mine;
+    }
+    return true;
+  }
   const p = pref || 'all';
   // Money moving in/out of a shared fund: the families it's about always get
   // it; anyone else only if this device opted in (💰 in the 🔔 picker).
   if (kind === 'money') {
-    if (Array.isArray(relatedFamIds) && famId != null && relatedFamIds.includes(famId)) return true;
+    if (mine) return true;
     return moneyPush === true;
   }
   if (p === 'all') return true;
   if (kind === 'chat' || kind === 'poll') return false;
   if (p === 'important') return true;
-  if (p === 'mine') return Array.isArray(relatedFamIds) && famId != null && relatedFamIds.includes(famId);
+  if (p === 'mine') return mine;
   return true;
 }
 
