@@ -3407,10 +3407,10 @@ const NOTIF_EMAIL_CATS=[
 // list, since every one rings. Closing an event and money leaving a fund
 // don't call (addNotif's noPhone), only new events and deposits do.
 const PHONE_CATS=[
-  {id:'poll',ico:'🗳',label:'סקר חדש',def:false},
+  {id:'poll',ico:'🗳',label:'סקר חדש',def:true},
   {id:'event',ico:'📅',label:'אירוע חדש',def:true,scoped:true},
   {id:'goalFund',ico:'🎯',label:'קופה חדשה למטרה',def:true},
-  {id:'money',ico:'💰',label:'הפקדת כסף לקופה',def:false,scoped:true},
+  {id:'money',ico:'💰',label:'הפקדת כסף לקופה',def:true,scoped:true},
   {id:'wallet',ico:'🏦',label:'הפקדה או משיכה בארנק שלנו',def:true},
   {id:'debt',ico:'📋',label:'תזכורת שבועית על חוב פתוח',def:true},
 ];
