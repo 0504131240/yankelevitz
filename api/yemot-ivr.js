@@ -193,7 +193,11 @@ module.exports = async (req, res) => {
   const families = phone ? ((await db.doc('appData/familyPayments').get()).data() || {}).families : null;
   const caller = phone && findCaller(families, phone);
   const fam = caller && caller.fam;
-  if (!fam) { bye(['המספר שממנו התקשרתם לא רשום באתר המשפחה', 'אפשר להוסיף אותו בעריכת המשפחה באתר']); return; }
+  if (!fam) {
+    // Last digits only, enough to tell which number to check on the site.
+    console.log('yemot-ivr: unknown caller ' + (phone ? '…' + phone.slice(-4) : 'with hidden/no number (ApiPhone=' + String(last(values.ApiPhone) || '').slice(-4) + ')'));
+    bye(['המספר שממנו התקשרתם לא רשום באתר המשפחה', 'אפשר להוסיף אותו בעריכת המשפחה באתר']); return;
+  }
 
   // Every key pressed so far in this call, in order.
   const steps = Object.keys(values).map(k => /^s(\d+)_(\w+)$/.exec(k)).filter(Boolean)
