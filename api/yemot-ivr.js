@@ -46,10 +46,9 @@ function findFamily(families, phone) {
 // menu: family recordings to hear and leave (YEMOT_RECORDINGS_FOLDER) and the
 // conference room (YEMOT_VOICE_FOLDER), e.g. "/5". No menu option without one.
 const folderEnv = v => (/^\/[\d/]+$/.test(process.env[v] || '') ? process.env[v] : '');
+// Option 4 records a new message straight into RECORDINGS (Yemot numbers
+// the file after the highest one there), so it plays under option 3.
 const RECORDINGS = folderEnv('YEMOT_RECORDINGS_FOLDER');
-// Where a caller leaves a new recording (a "הקלטות" extension saving into
-// RECORDINGS).
-const RECORD = folderEnv('YEMOT_RECORD_FOLDER');
 const VOICE = folderEnv('YEMOT_VOICE_FOLDER');
 const famShort = f => clean(String(f.name || '').replace(/^משפחת\s*/, ''));
 
@@ -215,9 +214,9 @@ module.exports = async (req, res) => {
       n ? (n === 1 ? 'יש סקר אחד שעוד לא עניתם עליו' : 'יש ' + n + ' סקרים שעוד לא עניתם עליהם') : '',
       'למידע מהאתר הקישו 1', 'לסקרים הקישו 2',
       RECORDINGS ? 'לשמיעת ההודעות המוקלטות של המשפחה הקישו 3' : '',
-      RECORD ? 'להשארת הודעה מוקלטת הקישו 4' : '',
+      RECORDINGS ? 'להשארת הודעה מוקלטת הקישו 4' : '',
       VOICE ? 'לחדר הוועידה המשפחתי הקישו 5' : ''],
-    'main', [1, 2, ...(RECORDINGS ? [3] : []), ...(RECORD ? [4] : []), ...(VOICE ? [5] : [])]);
+    'main', [1, 2, ...(RECORDINGS ? [3] : []), ...(RECORDINGS ? [4] : []), ...(VOICE ? [5] : [])]);
   };
   const infoMenu = (pre = []) => read([...pre,
     'למצב הארנק והחובות הקישו 1', 'לאירועים הפתוחים הקישו 2', 'לימי הולדת ושמחות קרובים הקישו 3',
@@ -245,11 +244,14 @@ module.exports = async (req, res) => {
     else if (step.digit === '2') askNext();
     // Yemot's own extensions; the caller carries on there, not in this menu.
     else if (step.digit === '3' && RECORDINGS) send('go_to_folder=' + RECORDINGS);
-    else if (step.digit === '4' && RECORD) send('go_to_folder=' + RECORD);
+    // read=<prompt>=<name>,<re-enter>,record,<folder>,<file name: auto>,<no confirm menu: no>,<save on hangup>,<append>,<min sec>,<max sec>
+    else if (step.digit === '4' && RECORDINGS) send('read=' + say(['הקליטו את ההודעה אחרי הצליל', 'בסיום הקישו סולמית']) + '=' +
+      ['s' + nextN + '_rec', 'no', 'record', RECORDINGS, '', '', 'yes', '', 2, 300].join(','));
     else if (step.digit === '5' && VOICE) send('go_to_folder=' + VOICE);
     else mainMenu();
     return;
   }
+  if (step.what === 'rec') { mainMenu(['תודה ההודעה נשמרה']); return; }
   if (step.what === 'info') {
     const fn = INFO[step.digit];
     if (fn) infoMenu(fn(data, fam));
