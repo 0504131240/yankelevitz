@@ -48,7 +48,7 @@ function findFamily(families, phone) {
 const folderEnv = v => (/^\/[\d/]+$/.test(process.env[v] || '') ? process.env[v] : '');
 const RECORDINGS = folderEnv('YEMOT_RECORDINGS_FOLDER');
 // Where a caller leaves a new recording (a "הקלטות" extension saving into
-// RECORDINGS); without it, option 3 just plays the recordings.
+// RECORDINGS).
 const RECORD = folderEnv('YEMOT_RECORD_FOLDER');
 const VOICE = folderEnv('YEMOT_VOICE_FOLDER');
 const famShort = f => clean(String(f.name || '').replace(/^משפחת\s*/, ''));
@@ -214,8 +214,10 @@ module.exports = async (req, res) => {
     read([...pre,
       n ? (n === 1 ? 'יש סקר אחד שעוד לא עניתם עליו' : 'יש ' + n + ' סקרים שעוד לא עניתם עליהם') : '',
       'למידע מהאתר הקישו 1', 'לסקרים הקישו 2',
-      RECORDINGS ? 'להודעות המוקלטות של המשפחה הקישו 3' : '',
-      VOICE ? 'לחדר הוועידה המשפחתי הקישו 4' : ''], 'main', [1, 2, ...(RECORDINGS ? [3] : []), ...(VOICE ? [4] : [])]);
+      RECORDINGS ? 'לשמיעת ההודעות המוקלטות של המשפחה הקישו 3' : '',
+      RECORD ? 'להשארת הודעה מוקלטת הקישו 4' : '',
+      VOICE ? 'לחדר הוועידה המשפחתי הקישו 5' : ''],
+    'main', [1, 2, ...(RECORDINGS ? [3] : []), ...(RECORD ? [4] : []), ...(VOICE ? [5] : [])]);
   };
   const infoMenu = (pre = []) => read([...pre,
     'למצב הארנק והחובות הקישו 1', 'לאירועים הפתוחים הקישו 2', 'לימי הולדת ושמחות קרובים הקישו 3',
@@ -242,17 +244,9 @@ module.exports = async (req, res) => {
     if (step.digit === '1') infoMenu();
     else if (step.digit === '2') askNext();
     // Yemot's own extensions; the caller carries on there, not in this menu.
-    else if (step.digit === '3' && RECORDINGS) {
-      if (RECORD) read(['לשמיעת ההודעות המוקלטות הקישו 1', 'להשארת הודעה חדשה הקישו 2', 'לחזרה לתפריט הראשי הקישו 0'], 'rec', [1, 2, 0]);
-      else send('go_to_folder=' + RECORDINGS);
-    }
-    else if (step.digit === '4' && VOICE) send('go_to_folder=' + VOICE);
-    else mainMenu();
-    return;
-  }
-  if (step.what === 'rec') {
-    if (step.digit === '1') send('go_to_folder=' + RECORDINGS);
-    else if (step.digit === '2' && RECORD) send('go_to_folder=' + RECORD);
+    else if (step.digit === '3' && RECORDINGS) send('go_to_folder=' + RECORDINGS);
+    else if (step.digit === '4' && RECORD) send('go_to_folder=' + RECORD);
+    else if (step.digit === '5' && VOICE) send('go_to_folder=' + VOICE);
     else mainMenu();
     return;
   }
