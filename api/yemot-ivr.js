@@ -259,7 +259,7 @@ module.exports = async (req, res) => {
       inbox = snap.exists ? (snap.data().items || []).map(i => i.text) : [];
       if (inbox.length) await ref.delete();
     } catch (e) { console.error('yemot-ivr: phoneInbox failed', e); }
-    mainMenu([firstName ? 'שלום ' + firstName : 'שלום משפחת ' + famShort(fam),
+    mainMenu([firstName ? 'שלום ' + firstName + ' ' + famShort(fam) : 'שלום משפחת ' + famShort(fam),
       ...(inbox.length ? [inbox.length === 1 ? 'יש לכם עדכון חדש' : 'יש לכם ' + inbox.length + ' עדכונים חדשים', ...inbox] : [])]);
     return;
   }
