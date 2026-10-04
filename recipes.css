@@ -264,3 +264,5 @@ li.done .rc-ing-tx{text-decoration:line-through;opacity:.45}
 
 .rc-pick .rc-pick-add{border-style:dashed;color:var(--rc-accent2);background:var(--rc-accent-bg);border-color:#FDBA74}
 .rc-hint{font-weight:600;opacity:.75}
+.rc-step-sec{font-weight:800;color:var(--rc-accent2);font-size:14px;padding:12px 2px 2px}
+.rc-step-sec:first-child{padding-top:0}

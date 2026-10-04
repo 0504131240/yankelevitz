@@ -153,8 +153,21 @@ function ingLines(r){
     return {sec:false,text:s.replace(/^[-•*]\s*/,'')};
   });
 }
-function stepLines(r){
-  return String(r.steps||'').split('\n').map(s=>s.trim().replace(/^(\d+[.)]|[-•*])\s*/,'')).filter(Boolean);
+// The method, with headings: like the ingredients, a line ending in ":"
+// (or starting with "#") titles the steps below it ("לבצק:", "להרכבה:").
+function stepItems(r){
+  return String(r.steps||'').split('\n').map(s=>s.trim()).filter(Boolean).map(s=>{
+    if(/^#/.test(s)||/[:：]$/.test(s))return {sec:true,text:s.replace(/^#+\s*/,'').replace(/[:：]$/,'').trim()};
+    return {sec:false,text:s.replace(/^(\d+[.)]|[-•*])\s*/,'')};
+  }).filter(x=>x.text);
+}
+// Just the steps themselves — numbering, cook mode and timers count these.
+function stepLines(r){return stepItems(r).filter(x=>!x.sec).map(x=>x.text);}
+// The heading the i-th step falls under, if any.
+function stepSection(r,i){
+  let sec='',n=-1;
+  for(const x of stepItems(r)){if(x.sec)sec=x.text;else if(++n===i)return sec;}
+  return '';
 }
 
 // ── timers found inside step text ("אופים 40 דקות", "חצי שעה"...) ──────────
@@ -510,7 +523,8 @@ function renderPage(){
       <div id="rcIngBox">${ingListHtml(r)}</div>
     </div>`:''}
     ${steps.length?`<div class="rc-box"><div class="rc-box-hd"><h3>📝 אופן ההכנה</h3><span style="font-size:11px;color:var(--rc-ink2)">לחצו על שלב כדי לסמן</span></div>
-      ${steps.map((s,i)=>`<div class="rc-step${S.stepDone.has(i)?' done':''}" onclick="rcToggleStep(${i},this)"><span class="rc-step-n">${S.stepDone.has(i)?'✓':i+1}</span><div class="rc-step-tx">${stepHtml(s,i+1)}</div></div>`).join('')}
+      ${(()=>{let i=-1;return stepItems(r).map(x=>{if(x.sec)return `<div class="rc-step-sec">${E(x.text)}</div>`;i++;
+        return `<div class="rc-step${S.stepDone.has(i)?' done':''}" onclick="rcToggleStep(${i},this)"><span class="rc-step-n">${S.stepDone.has(i)?'✓':i+1}</span><div class="rc-step-tx">${stepHtml(x.text,i+1)}</div></div>`;}).join('');})()}
     </div>`:''}
     ${r.tips?`<div class="rc-box"><div class="rc-box-hd"><h3>💡 טיפים וסודות</h3></div><div class="rc-tips">${E(r.tips)}</div></div>`:''}
     ${r.scan?`<div class="rc-box"><div class="rc-box-hd"><h3>📜 המתכון המקורי</h3><span style="font-size:11px;color:var(--rc-ink2)">לחצו להגדלה</span></div><img class="rc-scan" src="${r.scan}" alt="" onclick="rcZoom(this.src)"></div>`:''}
@@ -564,7 +578,7 @@ window.rcZoom=function(src){$('rcZoomImg').src=src;$('rcZoom').classList.add('op
 
 function recipeText(r){
   const ing=ingLines(r).map(l=>l.sec?`\n${l.text}:`:'• '+(s=>s.q+s.rest)(scaleLine(l.text,S.scale))).join('\n');
-  const st=stepLines(r).map((s,i)=>`${i+1}. ${s}`).join('\n');
+  let n=0;const st=stepItems(r).map(x=>x.sec?`\n${x.text}:`:`${++n}. ${x.text}`).join('\n').replace(/^\n/,'');
   return `🍲 *${r.title}*${r.origin?`\nמהמטבח של ${r.origin}`:''}\n\n🧺 *מצרכים*${S.scale!==1?` (×${fmtNum(S.scale)})`:''}\n${ing}\n\n📝 *אופן ההכנה*\n${st}${r.tips?`\n\n💡 ${r.tips}`:''}\n\n— מספר המתכונים של משפחת ינקלביץ`;
 }
 window.rcShare=async function(){
@@ -584,7 +598,7 @@ function printData(r,scale){
   return {
     title:r.title||'',origin:r.origin||'',photo:r.photo||null,cat:catOf(catsOf(r)[0]).lbl,
     ings:ingLines(r).map(l=>l.sec?{sec:l.text}:scaleLine(l.text,scale)),
-    steps:stepLines(r),note:r.tips||''
+    steps:stepItems(r),note:r.tips||''
   };
 }
 const PRINT_CSS=`
@@ -681,7 +695,7 @@ function printScript(){
   const blocks=r=>{
     const out=[`<div class="ttl">${esc(r.title)}</div>`];
     r.ings.forEach(x=>out.push(x.sec?`<div class="sec">${esc(x.sec)}:</div>`:`<div class="ing">${x.q?`<b><bdi dir="ltr">${esc(x.q)}</bdi></b>`:''}${esc(x.rest)}</div>`));
-    if(r.steps.length){out.push('<div class="hd">אופן הכנה:</div>');r.steps.forEach(s=>out.push(`<div class="st">${esc(s)}</div>`));}
+    if(r.steps.length){out.push('<div class="hd">אופן הכנה:</div>');r.steps.forEach(x=>out.push(x.sec?`<div class="sec">${esc(x.text)}:</div>`:`<div class="st">${esc(x.text)}</div>`));}
     if(r.note)out.push(`<div class="note">${esc(r.note).replace(/\n/g,'<br>')}</div>`);
     return out;
   };
@@ -863,7 +877,7 @@ function renderCook(){
     <div class="rc-cm-top"><button class="rc-ibtn" onclick="rcCloseCook()">✕</button><div class="rc-cm-ttl">${E(r.title)}</div>
       <button class="rc-ibtn" style="width:auto;padding:0 14px;border-radius:19px;font-size:13px;font-weight:800" onclick="$rcIngs(true)">🧺 מצרכים</button></div>
     <div class="rc-dots">${steps.map((_,j)=>`<i class="${j===i?'on':j<i?'past':''}"></i>`).join('')}</div>
-    <div class="rc-cm-body"><div class="rc-cm-n">שלב ${i+1} מתוך ${steps.length}</div><div class="rc-cm-step">${stepHtml(steps[i],i+1)}</div></div>
+    <div class="rc-cm-body"><div class="rc-cm-n">שלב ${i+1} מתוך ${steps.length}${stepSection(r,i)?` · ${E(stepSection(r,i))}`:''}</div><div class="rc-cm-step">${stepHtml(steps[i],i+1)}</div></div>
     <div class="rc-wake">${S.wake||('wakeLock' in navigator)?'☀️ המסך יישאר דלוק בזמן הבישול':''}</div>
     <div class="rc-cm-nav"><button onclick="rcCookGo(-1)" ${i===0?'disabled':''}>→ הקודם</button>
       <button class="pri" onclick="${last?'rcCookDone()':'rcCookGo(1)'}">${last?'🎉 סיימתי!':'הבא ←'}</button></div>
@@ -1044,7 +1058,7 @@ function renderEditor(){
     <div class="rc-f"><label>מצרכים</label><textarea id="rcEdIng" rows="7" placeholder="3 כוסות קמח&#10;1/2 כוס סוכר&#10;2 ביצים&#10;&#10;לציפוי:&#10;100 גרם שוקולד">${E(e.ingredients)}</textarea>
       <small>מצרך בכל שורה, עם הכמות בהתחלה — כך אפשר להגדיל ולהקטין את הכמויות אוטומטית. שורה שמסתיימת בנקודתיים (":") היא כותרת.</small></div>
     <div class="rc-f"><label>אופן ההכנה</label><textarea id="rcEdSteps" rows="7" placeholder="מערבבים את כל היבשים בקערה&#10;מוסיפים את הביצים ולשים בצק רך&#10;אופים 40 דקות ב-180 מעלות">${E(e.steps)}</textarea>
-      <small>שלב בכל שורה. זמנים כמו "40 דקות" או "חצי שעה" יהפכו אוטומטית לטיימר שאפשר להפעיל.</small></div>
+      <small>שלב בכל שורה. שורה שמסתיימת בנקודתיים (":") היא כותרת. זמנים כמו "40 דקות" או "חצי שעה" יהפכו אוטומטית לטיימר שאפשר להפעיל.</small></div>
     <div class="rc-f"><label>הסיפור מאחורי המתכון</label><textarea id="rcEdStory" rows="3" placeholder="סבתא הייתה מכינה את זה כל ערב שבת...">${E(e.story)}</textarea></div>
     <div class="rc-f"><label>טיפים וסודות</label><textarea id="rcEdTips" rows="2" placeholder="הסוד הוא...">${E(e.tips)}</textarea></div>
     <div class="rc-f"><label>השם שלך</label><input type="text" id="rcEdMe" value="${E(myName())}" placeholder="מי מוסיף/ה את המתכון?"></div>`;
