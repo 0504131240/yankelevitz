@@ -42,9 +42,12 @@ function findFamily(families, phone) {
   }
   return null;
 }
-// The family voice space: a regular Yemot extension (e.g. "/3") set in the
-// YEMOT_VOICE_FOLDER environment variable; no menu option without it.
-const VOICE = /^\/[\d/]+$/.test(process.env.YEMOT_VOICE_FOLDER || '') ? process.env.YEMOT_VOICE_FOLDER : '';
+// Regular Yemot extensions set up in the Yemot dashboard, reached from the
+// menu: family recordings to hear and leave (YEMOT_RECORDINGS_FOLDER) and the
+// conference room (YEMOT_VOICE_FOLDER), e.g. "/5". No menu option without one.
+const folderEnv = v => (/^\/[\d/]+$/.test(process.env[v] || '') ? process.env[v] : '');
+const RECORDINGS = folderEnv('YEMOT_RECORDINGS_FOLDER');
+const VOICE = folderEnv('YEMOT_VOICE_FOLDER');
 const famShort = f => clean(String(f.name || '').replace(/^משפחת\s*/, ''));
 
 // ── Polls ────────────────────────────────────────────────────────────────
@@ -207,7 +210,9 @@ module.exports = async (req, res) => {
     const n = unansweredPolls(data.polls, fam.id);
     read([...pre,
       n ? (n === 1 ? 'יש סקר אחד שעוד לא עניתם עליו' : 'יש ' + n + ' סקרים שעוד לא עניתם עליהם') : '',
-      'לסקרים הקישו 1', 'למידע מהאתר הקישו 2', VOICE ? 'לחדר הוועידה המשפחתי הקישו 3' : ''], 'main', VOICE ? [1, 2, 3] : [1, 2]);
+      'למידע מהאתר הקישו 1', 'לסקרים הקישו 2',
+      RECORDINGS ? 'להודעות המוקלטות של המשפחה הקישו 3' : '',
+      VOICE ? 'לחדר הוועידה המשפחתי הקישו 4' : ''], 'main', [1, 2, ...(RECORDINGS ? [3] : []), ...(VOICE ? [4] : [])]);
   };
   const infoMenu = (pre = []) => read([...pre,
     'למצב הארנק והחובות הקישו 1', 'לאירועים הפתוחים הקישו 2', 'לימי הולדת ושמחות קרובים הקישו 3',
@@ -231,11 +236,11 @@ module.exports = async (req, res) => {
 
   if (!step) { mainMenu(['שלום משפחת ' + famShort(fam)]); return; }
   if (step.what === 'main') {
-    if (step.digit === '1') askNext();
-    else if (step.digit === '2') infoMenu();
-    // Yemot's own extension (recordings to hear / leave), set up in the
-    // Yemot dashboard; the caller returns there, not to this menu.
-    else if (step.digit === '3' && VOICE) send('go_to_folder=' + VOICE);
+    if (step.digit === '1') infoMenu();
+    else if (step.digit === '2') askNext();
+    // Yemot's own extensions; the caller carries on there, not in this menu.
+    else if (step.digit === '3' && RECORDINGS) send('go_to_folder=' + RECORDINGS);
+    else if (step.digit === '4' && VOICE) send('go_to_folder=' + VOICE);
     else mainMenu();
     return;
   }
