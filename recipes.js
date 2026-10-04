@@ -11,8 +11,13 @@
 'use strict';
 
 const FS_URL='https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
-// Scan-a-photo needs /api/recipe-scan plus an AI key on the server; off until that's set up.
-const SCAN_ENABLED=!!window.RECIPES_SCAN_MOCK;
+// Scan-a-photo needs /api/recipe-scan plus an AI key on the server; the box
+// shows only once the server says it's set up (checked on first open).
+let SCAN_ENABLED=!!window.RECIPES_SCAN_MOCK;
+function checkScan(){
+  if(SCAN_ENABLED||checkScan.done)return;checkScan.done=true;
+  fetch('/api/recipe-scan').then(r=>r.ok?r.json():{}).then(d=>{SCAN_ENABLED=!!d.enabled;}).catch(()=>{});
+}
 const CATS=[
   {id:'main',lbl:'עיקריות',ico:'🍗'},{id:'side',lbl:'תוספות',ico:'🍚'},{id:'salad',lbl:'סלטים',ico:'🥗'},
   {id:'soup',lbl:'מרקים',ico:'🍲'},{id:'bake',lbl:'מאפים ולחמים',ico:'🥖'},{id:'cake',lbl:'עוגות',ico:'🎂'},
@@ -276,6 +281,7 @@ window.openRecipesOverlay=function(){
   $('recipesOverlay').classList.add('open');
   document.body.style.overflow='hidden';
   updateShopBadge();
+  checkScan();
   if(!S.store){
     S.store=window.RECIPES_MOCK?mockStore():firestoreStore();
     renderList();
