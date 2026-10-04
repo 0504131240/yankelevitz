@@ -56,8 +56,9 @@ function familyPhones(f) {
 // the families it's about.
 const PHONE_KINDS = new Set(['poll', 'event', 'goalFund', 'money', 'deposit']);
 const PREF_OF_KIND = { deposit: 'wallet' };
-// "רק שלנו" unless the parent chose "כולם" (PHONE_CATS defScope in app.js).
-const DEFAULT_SCOPE = { event: 'mine', money: 'mine' };
+// Calls only about the caller's own family: a new event they take part in,
+// a deposit to a fund that concerns them. (No "everyone" option for phones.)
+const ONLY_MINE = new Set(['event', 'money']);
 
 // Every parent phone whose chosen categories include this notification kind.
 function phoneEntriesFor(families, kind, { target, excludeFamIds, relatedFamIds, noPhone } = {}, text) {
@@ -73,8 +74,7 @@ function phoneEntriesFor(families, kind, { target, excludeFamIds, relatedFamIds,
     const related = (relatedFamIds || []).includes(f.id);
     familyPhones(f).forEach(p => {
       if (!p.cats[pref]) return;
-      // "רק שלנו": only when the notification is about this family.
-      if ((p.scopes[pref] || DEFAULT_SCOPE[pref]) === 'mine' && !related) return;
+      if (ONLY_MINE.has(pref) && !related) return;
       out.push({ phone: p.phone, text: spoken });
     });
   });

@@ -3368,7 +3368,7 @@ function _npPhonePane(f,phones){
     const name=(slot===2?f.emailName2:f.emailName)||(slot===2?'הורה 2':'הורה 1');
     const cats=p.cats||{},scopes=p.scopes||{};
     return`<div class="np-phone">`+_npSwitch(!p.off,`togglePhoneOn(${slot},this.checked)`,`📞 קבל שיחות – ${esc(name)}`,`<span dir="ltr">${esc(p.phone)}</span>`)
-      +(p.off?'':`<div class="np-sep"></div><div class="np-hint">מה יגיע בשיחה</div>`+_npCatList(PHONE_CATS,c=>!!cats[c.id],c=>scopes[c.id]||c.defScope,'togglePhoneCat','setPhoneScope',slot+','))+`</div>`;
+      +(p.off?'':`<div class="np-sep"></div><div class="np-hint">מה יגיע בשיחה</div>`+_npCatList(PHONE_CATS,c=>!!cats[c.id],c=>scopes[c.id],'togglePhoneCat','setPhoneScope',slot+','))+`</div>`;
   }).join('')+`<div class="np-foot">אין שיחות בשבת ובחג. מה שקורה בלילה (22:00–08:00) מגיע בבוקר.</div>`;
 }
 // Server rule (api/_lib/yemot.js): only explicitly checked kinds call.
@@ -3408,9 +3408,9 @@ const NOTIF_EMAIL_CATS=[
 // don't call (addNotif's noPhone), only new events and deposits do.
 const PHONE_CATS=[
   {id:'poll',ico:'🗳',label:'סקר חדש',def:true},
-  {id:'event',ico:'📅',label:'אירוע חדש',def:true,scoped:true,defScope:'mine'},
+  {id:'event',ico:'📅',label:'אירוע חדש שאנחנו משתתפים בו',def:true},
   {id:'goalFund',ico:'🎯',label:'קופה חדשה למטרה',def:true},
-  {id:'money',ico:'💰',label:'הפקדת כסף לקופה',def:true,scoped:true,defScope:'mine'},
+  {id:'money',ico:'💰',label:'הפקדת כסף לקופה שקשורה אלינו',def:true},
   {id:'wallet',ico:'🏦',label:'הפקדה או משיכה בארנק שלנו',def:true},
   {id:'debt',ico:'📋',label:'תזכורת שבועית על חוב פתוח',def:true},
 ];
