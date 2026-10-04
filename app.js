@@ -398,13 +398,13 @@ async function addBroadcastImages(inp){
   _renderBroadcastImages();
 }
 function removeBroadcastImage(i){_bcImages.splice(i,1);_renderBroadcastImages();}
+// Through the server (api/email-img.js): Firestore rules don't let the
+// browser write emailImages directly.
 async function _uploadEmailImage(dataUrl){
-  const {db,doc,setDoc}=await fbInit();
-  const id=Date.now().toString(36)+Math.random().toString(36).slice(2,12);
-  const comma=dataUrl.indexOf(',');
-  const type=dataUrl.slice(5,dataUrl.indexOf(';'));
-  await setDoc(doc(db,'emailImages',id),{type,data:dataUrl.slice(comma+1),ts:Date.now()});
-  return location.origin+'/api/email-img?id='+id;
+  const r=await fetch('/api/email-img',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminPass,dataUrl})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.id)throw new Error(r.status===401?'סיסמת הניהול לא אושרה':(d.error||('שגיאה '+r.status)));
+  return location.origin+'/api/email-img?id='+d.id;
 }
 function openBroadcastModal(){
   _ensureBroadcastImagesUI();_bcImages=[];_renderBroadcastImages();
