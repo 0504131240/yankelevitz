@@ -914,10 +914,25 @@ function tickTimers(){
   const now=Date.now();
   S.timers.forEach(t=>{if(!t.ring&&t.end<=now){t.ring=true;beep();toast('⏰ הטיימר הסתיים! '+t.label,5000);}});
   if(S.timers.some(t=>t.ring)&&now%3000<500)beep();
-  box.innerHTML=S.timers.map(t=>`<div class="rc-timer${t.ring?' ring':''}">
-    <div><div class="rc-timer-t">${t.ring?'⏰ 0:00':fmtClock((t.end-now)/1000)}</div><div class="rc-timer-l">${E(t.label)}</div></div>
+  // Each timer's box is built once (and again only when it starts ringing);
+  // every tick just updates its digits, so it stays put instead of
+  // re-playing its entrance animation twice a second.
+  const live=new Set(S.timers.map(t=>String(t.id)));
+  [...box.children].forEach(el=>{if(!live.has(el.dataset.id))el.remove();});
+  S.timers.forEach(t=>{
+    let el=box.querySelector(`[data-id="${t.id}"]`);
+    if(!el||el.classList.contains('ring')!==t.ring){
+      const fresh=document.createElement('div');
+      fresh.className='rc-timer'+(t.ring?' ring':'');fresh.dataset.id=t.id;
+      fresh.innerHTML=`<div><div class="rc-timer-t"></div><div class="rc-timer-l">${E(t.label)}</div></div>
     ${t.ring?'':`<button onclick="rcTimerAdd(${t.id})" title="דקה נוספת">+1</button>`}
-    <button onclick="rcTimerStop(${t.id})" title="${t.ring?'סיום':'ביטול'}">${t.ring?'✓':'✕'}</button></div>`).join('');
+    <button onclick="rcTimerStop(${t.id})" title="${t.ring?'סיום':'ביטול'}">${t.ring?'✓':'✕'}</button>`;
+      if(el)el.replaceWith(fresh);else box.appendChild(fresh);
+      el=fresh;
+    }
+    const txt=t.ring?'⏰ 0:00':fmtClock((t.end-now)/1000),tEl=el.querySelector('.rc-timer-t');
+    if(tEl.textContent!==txt)tEl.textContent=txt;
+  });
   if(!S.timers.length&&S.tick){clearInterval(S.tick);S.tick=null;}
 }
 window.rcTimerAdd=function(id){const t=S.timers.find(x=>x.id===id);if(t)t.end+=60000;tickTimers();};
