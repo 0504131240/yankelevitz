@@ -5923,6 +5923,7 @@ function openFamDetail(famId){
   // straight from their own wallet balance — not an admin-only tool, see
   // openFamTransferSheet/confirmFamTransfer.
   const _myFid=_myFamId();
+  if(_myFid!=null&&_myFid===famId&&mainBal>0)html+=_wdReqButton(famId,'margin-bottom:14px');
   if(_myFid!=null&&_myFid!==famId){
     html+=`<button onclick="openFamTransferSheet(${famId})" style="width:100%;padding:11px;border-radius:var(--r2);border:none;background:var(--blue-mid);color:#fff;font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer;margin-bottom:14px">💸 העבר כסף מהארנק שלי למשפחה זו</button>`;
   }
@@ -7524,6 +7525,7 @@ function showEmailGateWelcome(fam,slot){
           <span style="font-size:13px;color:var(--text2)">יתרתך בארנק</span>
           <span style="font-size:14px;font-weight:700;color:${fundBal>=0?'var(--green-mid)':'var(--red-mid)'}">₪${fundBal.toLocaleString()}</span>
         </div>
+        ${fundBal>0?_wdReqButton(fam.id,'margin-top:10px'):''}
       </div>
       ${evBals.length?`
       <div style="background:${totalEvBal<-0.5?'var(--red-bg)':'var(--surface2)'};border-radius:var(--r2);padding:12px 14px;margin-bottom:16px;text-align:right">
@@ -7765,6 +7767,7 @@ function renderFund(){
   // Treasurer deficit — how much the shared fund owes back the treasurer
   // for transfers they fronted personally (see markTransferFromTreasurer),
   // instead of drawing on any specific family's own wallet balance.
+  _renderWdRequests();
   const deficitEl=document.getElementById('treasurerDeficitSection');
   if(deficitEl){
     const deficit=Math.round(fund.deficit||0);
@@ -8610,6 +8613,115 @@ function sendSelectedGoalReminders(){
   showToast(`📧 שולח תזכורת ל-${famIds.length} משפחות...`);
 }
 
+// Withdrawal requests: a family asks the admin to pay out money from its
+// wallet (welcome popup / own family card). Kept in fund.withdrawRequests
+// until the admin carries it out through the regular withdrawal sheet
+// (_wdReqHandling) or turns it down; the admin gets a push and a bell entry.
+let _wdReqHandling=null;
+const _wdReqButton=(famId,style)=>`<button onclick="openWdRequest(${famId})" style="width:100%;padding:10px;border-radius:var(--r2);border:1.5px solid var(--green-mid);background:transparent;color:var(--green-mid);font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer;${style||''}">🏧 בקשה למשיכה מהארנק</button>`;
+function openWdRequest(famId){
+  const f=getFam(famId);if(!f)return;
+  const bal=Math.round(famFundBal(famId)*100)/100;
+  const pending=(fund.withdrawRequests||[]).find(r=>r.famId===famId);
+  let m=document.getElementById('wdReqModal');
+  if(!m){
+    m=document.createElement('div');m.id='wdReqModal';
+    m.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2800;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
+    m.onclick=e=>{if(e.target===m)closeWdRequest();};
+    document.body.appendChild(m);
+  }
+  const inp='width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:11px 12px;font-size:15px;font-family:var(--font);background:var(--bg);color:var(--text);box-sizing:border-box';
+  m.innerHTML=`<div style="background:var(--surface);border-radius:var(--r);padding:20px;width:100%;max-width:360px;box-sizing:border-box">
+    <div style="font-size:16px;font-weight:800;color:var(--text);margin-bottom:4px">🏧 בקשה למשיכה</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">היתרה שלכם בארנק: <b>₪${bal.toLocaleString()}</b>. הבקשה תישלח למנהל, והוא יעביר לכם את הכסף.</div>
+    ${pending?`<div style="background:var(--amber-bg);color:var(--amber);border-radius:var(--r2);padding:10px 12px;font-size:12px;line-height:1.5;margin-bottom:12px">כבר נשלחה בקשה למשיכת ₪${pending.amt.toLocaleString()} שעוד מחכה למנהל. בקשה חדשה תחליף אותה.
+      <button type="button" onclick="cancelWdRequest(${famId})" style="display:block;margin-top:6px;border:none;background:none;color:var(--red-mid);font-weight:700;font-family:var(--font);padding:0;cursor:pointer;text-decoration:underline">ביטול הבקשה הקיימת</button></div>`:''}
+    <label style="display:block;font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px" for="wdReqAmt">כמה למשוך? (₪)</label>
+    <input id="wdReqAmt" type="number" min="1" max="${bal}" inputmode="decimal" oninput="document.getElementById('wdReqErr').style.display='none'" value="${pending?pending.amt:''}" style="${inp};direction:ltr;text-align:center;font-size:18px;margin-bottom:10px">
+    <label style="display:block;font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px" for="wdReqNote">איך להעביר? (אופציונלי)</label>
+    <input id="wdReqNote" type="text" maxlength="120" placeholder="למשל: בביט למספר..., או העברה לחשבון" value="${pending?esc(pending.note||''):''}" style="${inp};font-size:13px;margin-bottom:6px">
+    <div id="wdReqErr" style="display:none;font-size:12px;color:var(--red-mid);margin-bottom:6px"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button type="button" onclick="closeWdRequest()" style="flex:1;padding:11px;border-radius:var(--r2);border:1.5px solid var(--border);background:transparent;color:var(--text2);font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer">ביטול</button>
+      <button type="button" onclick="submitWdRequest(${famId})" style="flex:2;padding:11px;border-radius:var(--r2);border:none;background:var(--green-mid);color:#fff;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer">שלח בקשה</button>
+    </div>
+  </div>`;
+  m.style.display='flex';
+  setTimeout(()=>document.getElementById('wdReqAmt')?.focus(),100);
+}
+function closeWdRequest(){const m=document.getElementById('wdReqModal');if(m)m.style.display='none';}
+// Admin-only news, kept off every family's bell (here the bell shows all
+// entries to all families) while still pushing to admin devices.
+function _notifyAdminOnly(icon,text){
+  addNotif(icon,text,'admin',undefined,'familyEdit');
+  if(notifications[0])notifications[0].hiddenFrom=families.map(x=>x.id).filter(id=>id!=null);
+}
+function submitWdRequest(famId){
+  const f=getFam(famId);if(!f)return;
+  const err=document.getElementById('wdReqErr');
+  const say=t=>{if(err){err.textContent=t;err.style.display='block';}};
+  const amt=Math.round((parseFloat(document.getElementById('wdReqAmt')?.value)||0)*100)/100;
+  const bal=famFundBal(famId);
+  if(amt<=0){say('נא לרשום סכום');return;}
+  if(amt>bal+0.001){say('אפשר לבקש עד ₪'+(Math.round(bal*100)/100).toLocaleString()+' — היתרה שלכם בארנק');return;}
+  const note=(document.getElementById('wdReqNote')?.value||'').trim();
+  const slot=parseInt(localStorage.getItem('deviceEmailSlot3')||'1');
+  const by=(typeof _regDisplayName==='function'?_regDisplayName(f,slot):null)||f.name.replace('משפחת','').trim();
+  const list=(fund.withdrawRequests||[]).filter(r=>r.famId!==famId);
+  list.push({id:Date.now(),famId,amt,note:note||null,by,ts:Date.now(),date:new Date().toLocaleDateString('he-IL')});
+  fund.withdrawRequests=list;
+  _notifyAdminOnly('🏧',by+' ביקש/ה למשוך ₪'+amt.toLocaleString()+' מהארנק'+(note?' · '+note:''));
+  save();render();closeWdRequest();
+  showToast('✓ הבקשה נשלחה למנהל',2500);
+}
+function cancelWdRequest(famId){
+  fund.withdrawRequests=(fund.withdrawRequests||[]).filter(r=>r.famId!==famId);
+  if(!fund.withdrawRequests.length)delete fund.withdrawRequests;
+  save();render();closeWdRequest();
+  showToast('הבקשה בוטלה',2000);
+}
+// Admin: pending requests above the wallet buttons on the payments page.
+function _renderWdRequests(){
+  const anchor=document.getElementById('treasurerDeficitSection');if(!anchor)return;
+  let el=document.getElementById('wdRequestsSection');
+  if(!el){el=document.createElement('div');el.id='wdRequestsSection';anchor.before(el);}
+  const list=(fund.withdrawRequests||[]).filter(r=>getFam(r.famId));
+  if(!editMode||!list.length){el.innerHTML='';return;}
+  el.innerHTML=`<div style="background:var(--amber-bg);border-radius:var(--r);padding:12px 14px;margin-bottom:10px">
+    <div style="font-size:13px;font-weight:800;color:var(--amber);margin-bottom:8px">🏧 בקשות משיכה (${list.length})</div>
+    ${list.map(r=>{
+      const bal=Math.round(famFundBal(r.famId)*100)/100;
+      return`<div style="background:var(--surface);border-radius:var(--r2);padding:10px 12px;margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <span style="font-size:13px;font-weight:700;color:var(--text)">${esc(r.by||getFam(r.famId).name)}</span>
+          <span style="font-size:15px;font-weight:800;color:var(--red-mid)">₪${r.amt.toLocaleString()}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">${esc(r.date||'')} · יתרה בארנק ₪${bal.toLocaleString()}${r.note?' · '+esc(r.note):''}</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button onclick="handleWdRequest(${r.id})" style="flex:2;padding:7px;border-radius:20px;border:none;background:var(--red-mid);color:#fff;font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">↑ בצע משיכה</button>
+          <button onclick="rejectWdRequest(${r.id})" style="flex:1;padding:7px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text2);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">דחה</button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+// Opens the regular withdrawal sheet filled in; confirming it removes the request.
+function handleWdRequest(id){
+  const r=(fund.withdrawRequests||[]).find(x=>x.id===id);if(!r)return;
+  openDepositSheet('withdraw');
+  selectDepFam(r.famId);
+  const a=document.getElementById('depositAmt');if(a)a.value=Math.min(r.amt,Math.max(0,famFundBal(r.famId)));
+  const n=document.getElementById('depositNote');if(n&&r.note)n.value=r.note;
+  _wdReqHandling=id;
+}
+function rejectWdRequest(id){
+  const r=(fund.withdrawRequests||[]).find(x=>x.id===id);if(!r)return;
+  if(!confirm('לדחות את הבקשה של '+(r.by||'המשפחה')+' למשוך ₪'+r.amt.toLocaleString()+'?'))return;
+  fund.withdrawRequests=fund.withdrawRequests.filter(x=>x.id!==id);
+  if(!fund.withdrawRequests.length)delete fund.withdrawRequests;
+  save();render();
+}
+
 let _depositFamId=null;
 let _depositMode='deposit';
 function openDepositSheet(mode){
@@ -8663,7 +8775,7 @@ function selectDepFam(famId){
 }
 function closeDepositSheet(){
   document.getElementById('depositOverlay').style.display='none';
-  _depositFamId=null;
+  _depositFamId=null;_wdReqHandling=null;
 }
 function confirmDeposit(){
   if(!_depositFamId){ alert('נא לבחור משפחה'); return; }
@@ -8693,6 +8805,11 @@ function confirmDeposit(){
     note:note||null,
     date:new Date().toLocaleDateString('he-IL')});
   const _notifyFamId=_depositFamId;
+  if(!isDeposit&&_wdReqHandling!=null){
+    fund.withdrawRequests=(fund.withdrawRequests||[]).filter(r=>!(r.id===_wdReqHandling&&r.famId===_depositFamId));
+    if(!fund.withdrawRequests.length)delete fund.withdrawRequests;
+  }
+  _wdReqHandling=null;
   closeDepositSheet();
   save();render();
   addNotif(isDeposit?'💰':'💸',name+(isDeposit?' הפקיד/ה ₪':' משך/ה ₪')+amt.toLocaleString()+(isDeposit?' לארנק':' מהארנק'),undefined,_hideFromAllBut([_notifyFamId]),'deposit',[_notifyFamId]);
