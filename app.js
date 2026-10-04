@@ -354,7 +354,60 @@ async function saveEjsSettings(){
     if(st){st.textContent='⚠ שמירה נכשלה';st.style.color='var(--red)';}
   }
 }
+// Images attached to a broadcast: shown where the text says "[תמונה N]",
+// any not mentioned go at the end. Emails can't embed them reliably, so on
+// send each is uploaded to Firestore emailImages/{id} and the email links
+// to /api/email-img?id=…; the preview just uses the local copy.
+let _bcImages=[];
+function _ensureBroadcastImagesUI(){
+  if(document.getElementById('broadcastImgs'))return;
+  const msg=document.getElementById('broadcastMsg');if(!msg)return;
+  const box=document.createElement('div');box.id='broadcastImgs';box.style.marginTop='10px';
+  box.innerHTML=`<label style="display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:20px;border:1.5px solid var(--border);font-size:12px;font-weight:700;color:var(--text);cursor:pointer">📎 הוסף תמונות
+      <input type="file" accept="image/*" multiple id="broadcastImgInp" style="display:none" onchange="addBroadcastImages(this)"></label>
+    <div id="broadcastImgList" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
+    <div id="broadcastImgHint" style="display:none;font-size:11px;color:var(--text2);line-height:1.5;margin-top:6px">כדי לשים תמונה במקום מסוים, כתבו בטקסט <b>[תמונה 1]</b>, <b>[תמונה 2]</b>... תמונה שלא מוזכרת תופיע בסוף ההודעה.</div>`;
+  msg.closest('.field').after(box);
+}
+function _renderBroadcastImages(){
+  const list=document.getElementById('broadcastImgList');if(!list)return;
+  list.innerHTML=_bcImages.map((im,i)=>`<div style="position:relative;width:64px;height:64px;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
+      <img src="${im}" style="width:100%;height:100%;object-fit:cover" alt="">
+      <span style="position:absolute;top:2px;right:2px;background:var(--blue-mid);color:#fff;border-radius:10px;padding:0 6px;font-size:11px;font-weight:800">${i+1}</span>
+      <button type="button" onclick="removeBroadcastImage(${i})" aria-label="הסר" style="position:absolute;bottom:2px;left:2px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,.6);color:#fff;font-size:12px;line-height:1;cursor:pointer">✕</button>
+    </div>`).join('');
+  const hint=document.getElementById('broadcastImgHint');if(hint)hint.style.display=_bcImages.length?'block':'none';
+}
+// Shrunk to at most 700×1400 JPEG so each fits comfortably in a Firestore doc.
+function _shrinkImage(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onerror=reject;
+    r.onload=()=>{const img=new Image();img.onerror=reject;img.onload=()=>{
+      const k=Math.min(1,700/img.width,1400/img.height);
+      const c=document.createElement('canvas');c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);
+      const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0,c.width,c.height);
+      resolve(c.toDataURL('image/jpeg',0.82));
+    };img.src=r.result;};
+    r.readAsDataURL(file);
+  });
+}
+async function addBroadcastImages(inp){
+  const files=[...(inp.files||[])];inp.value='';
+  for(const f of files){ try{_bcImages.push(await _shrinkImage(f));}catch(e){showToast('❌ לא ניתן לקרוא את התמונה '+f.name);} }
+  _renderBroadcastImages();
+}
+function removeBroadcastImage(i){_bcImages.splice(i,1);_renderBroadcastImages();}
+async function _uploadEmailImage(dataUrl){
+  const {db,doc,setDoc}=await fbInit();
+  const id=Date.now().toString(36)+Math.random().toString(36).slice(2,12);
+  const comma=dataUrl.indexOf(',');
+  const type=dataUrl.slice(5,dataUrl.indexOf(';'));
+  await setDoc(doc(db,'emailImages',id),{type,data:dataUrl.slice(comma+1),ts:Date.now()});
+  return location.origin+'/api/email-img?id='+id;
+}
 function openBroadcastModal(){
+  _ensureBroadcastImagesUI();_bcImages=[];_renderBroadcastImages();
   const subjEl=document.getElementById('broadcastSubject');if(subjEl)subjEl.value='';
   const msgEl=document.getElementById('broadcastMsg');if(msgEl)msgEl.value='';
   const err=document.getElementById('broadcastErr');if(err)err.style.display='none';
@@ -368,8 +421,15 @@ function closeBroadcastModal(){
 }
 // Shared by sendBroadcastEmail() and previewBroadcastEmail() so the preview
 // is always built exactly the same way as what actually gets sent.
-function _broadcastEmailHtml(subject,msg){
-  const bodyHtml=`<p style="white-space:pre-wrap;margin:0">${_esc(msg)}</p>`;
+function _broadcastEmailHtml(subject,msg,imgSrcs){
+  const srcs=imgSrcs||[];
+  const imgTag=i=>`<div style="text-align:center;margin:14px 0"><img src="${_esc(srcs[i])}" alt="תמונה ${i+1}" width="280" style="max-width:100%;width:280px;height:auto;border-radius:10px;border:1px solid #ddd"></div>`;
+  const used=new Set();
+  const bodyHtml=msg.split(/(\[תמונה\s*\d+\])/).map(part=>{
+    const m=part.match(/^\[תמונה\s*(\d+)\]$/);
+    if(m){const i=parseInt(m[1],10)-1;if(srcs[i]){used.add(i);return imgTag(i);}return '';}
+    return part.trim()?`<p style="white-space:pre-wrap;margin:0 0 6px">${_esc(part.replace(/^\n+|\n+$/g,''))}</p>`:'';
+  }).join('')+srcs.map((_,i)=>used.has(i)?'':imgTag(i)).join('');
   return _emailWrap(bodyHtml,subject,'📢','');
 }
 function previewBroadcastEmail(){
@@ -379,13 +439,13 @@ function previewBroadcastEmail(){
   if(!subject||!msg){if(err){err.textContent='נא למלא נושא ותוכן כדי לראות תצוגה מקדימה';err.style.display='block';}return;}
   if(err)err.style.display='none';
   const frame=document.getElementById('broadcastPreviewFrame');
-  if(frame)frame.srcdoc=_broadcastEmailHtml(subject,msg);
+  if(frame)frame.srcdoc=_broadcastEmailHtml(subject,msg,_bcImages);
   document.getElementById('broadcastPreviewModal').style.display='flex';
 }
 function closeBroadcastPreviewModal(){
   document.getElementById('broadcastPreviewModal').style.display='none';
 }
-function sendBroadcastEmail(){
+async function sendBroadcastEmail(){
   const subject=(document.getElementById('broadcastSubject')?.value||'').trim();
   const msg=(document.getElementById('broadcastMsg')?.value||'').trim();
   const err=document.getElementById('broadcastErr');
@@ -393,8 +453,15 @@ function sendBroadcastEmail(){
   const recipients=families.filter(f=>f.email||f.email2).map(f=>({email:f.email,email2:f.email2,name:f.name.replace('משפחת','').trim()}));
   if(!recipients.length){if(err){err.textContent='אין משפחות עם כתובת מייל שמורה';err.style.display='block';}return;}
   if(err)err.style.display='none';
-  const html=_broadcastEmailHtml(subject,msg);
-  sendEmailNotif(recipients,subject,msg,html);
+  let urls=[];
+  if(_bcImages.length){
+    showToast('⏳ מעלה תמונות...');
+    try{ urls=await Promise.all(_bcImages.map(_uploadEmailImage)); }
+    catch(e){ if(err){err.textContent='העלאת התמונות נכשלה: '+(e.message||e);err.style.display='block';} return; }
+  }
+  const html=_broadcastEmailHtml(subject,msg,urls);
+  const plain=msg.replace(/\[תמונה\s*(\d+)\]/g,'(תמונה $1)');
+  sendEmailNotif(recipients,subject,plain,html);
   closeBroadcastModal();
   showToast('📧 ההודעה נשלחה לכולם');
 }
