@@ -47,6 +47,9 @@ function findFamily(families, phone) {
 // conference room (YEMOT_VOICE_FOLDER), e.g. "/5". No menu option without one.
 const folderEnv = v => (/^\/[\d/]+$/.test(process.env[v] || '') ? process.env[v] : '');
 const RECORDINGS = folderEnv('YEMOT_RECORDINGS_FOLDER');
+// Where a caller leaves a new recording (a "הקלטות" extension saving into
+// RECORDINGS); without it, option 3 just plays the recordings.
+const RECORD = folderEnv('YEMOT_RECORD_FOLDER');
 const VOICE = folderEnv('YEMOT_VOICE_FOLDER');
 const famShort = f => clean(String(f.name || '').replace(/^משפחת\s*/, ''));
 
@@ -239,8 +242,17 @@ module.exports = async (req, res) => {
     if (step.digit === '1') infoMenu();
     else if (step.digit === '2') askNext();
     // Yemot's own extensions; the caller carries on there, not in this menu.
-    else if (step.digit === '3' && RECORDINGS) send('go_to_folder=' + RECORDINGS);
+    else if (step.digit === '3' && RECORDINGS) {
+      if (RECORD) read(['לשמיעת ההודעות המוקלטות הקישו 1', 'להשארת הודעה חדשה הקישו 2', 'לחזרה לתפריט הראשי הקישו 0'], 'rec', [1, 2, 0]);
+      else send('go_to_folder=' + RECORDINGS);
+    }
     else if (step.digit === '4' && VOICE) send('go_to_folder=' + VOICE);
+    else mainMenu();
+    return;
+  }
+  if (step.what === 'rec') {
+    if (step.digit === '1') send('go_to_folder=' + RECORDINGS);
+    else if (step.digit === '2' && RECORD) send('go_to_folder=' + RECORD);
     else mainMenu();
     return;
   }
