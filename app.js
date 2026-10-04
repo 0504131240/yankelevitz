@@ -3327,7 +3327,8 @@ function renderNotifPrefModal(){
   const phones=f?[1,2].map(sl=>({slot:sl,p:_parentPhone(f,sl)})).filter(x=>x.p&&x.p.phone):[];
   const pushStatus=_notifOk()?PUSH_CATS.filter(c=>_pushPrefs().cats[c.id]).length+' נבחרו':'כבוי';
   const emailStatus=emailPref?NOTIF_EMAIL_CATS.filter(c=>_notifEmailCatOn(emailPref,c.id)).length+' נבחרו':'כבוי';
-  const phoneStatus=phones.length?phones.length+(phones.length===1?' מספר':' מספרים'):'אין מספר';
+  const phonesOn=phones.filter(x=>!x.p.off).length;
+  const phoneStatus=!phones.length?'אין מספר':!phonesOn?'כבוי':phonesOn===1?'פעיל':phonesOn+' פעילים';
   const tabs=[['push','📱','פוש',pushStatus],['email','📧','מייל',emailStatus],['phone','📞','פלאפון',phoneStatus]];
   el.innerHTML=`<div class="np-tabs" role="tablist">${tabs.map(([id,ico,label,st])=>`<button type="button" role="tab" aria-selected="${_npTab===id}" class="np-tab${_npTab===id?' on':''}" onclick="setNpTab('${id}')"><span class="np-tab-ico">${ico}</span><span class="np-tab-l">${label}</span><span class="np-tab-s">${st}</span></button>`).join('')}</div>
     <div class="np-pane">${_npTab==='email'?_npEmailPane(f,slot):_npTab==='phone'?_npPhonePane(f,phones):_npPushPane(f,slot,emailPref)}</div>`;
@@ -3366,20 +3367,22 @@ function _npPhonePane(f,phones){
   return phones.map(({slot,p})=>{
     const name=(slot===2?f.emailName2:f.emailName)||(slot===2?'הורה 2':'הורה 1');
     const cats=p.cats||{},scopes=p.scopes||{};
-    return`<div class="np-phone"><div class="np-phone-h">📞 ${esc(name)} <span dir="ltr">${esc(p.phone)}</span></div>`
-      +_npCatList(PHONE_CATS,c=>!!cats[c.id],c=>scopes[c.id],'togglePhoneCat','setPhoneScope',slot+',')+`</div>`;
+    return`<div class="np-phone">`+_npSwitch(!p.off,`togglePhoneOn(${slot},this.checked)`,`📞 קבל שיחות – ${esc(name)}`,`<span dir="ltr">${esc(p.phone)}</span>`)
+      +(p.off?'':`<div class="np-sep"></div><div class="np-hint">מה יגיע בשיחה</div>`+_npCatList(PHONE_CATS,c=>!!cats[c.id],c=>scopes[c.id],'togglePhoneCat','setPhoneScope',slot+','))+`</div>`;
   }).join('')+`<div class="np-foot">אין שיחות בשבת ובחג. מה שקורה בלילה (22:00–08:00) מגיע בבוקר.</div>`;
 }
 // Server rule (api/_lib/yemot.js): only explicitly checked kinds call.
 function _editMyPhone(slot,fn){
   const f=_myFam();if(!f)return;
   const cur=_parentPhone(f,slot);if(!cur)return;
-  const next={phone:cur.phone,cats:{...(cur.cats||{})},scopes:{...(cur.scopes||{})}};
+  const next={phone:cur.phone,cats:{...(cur.cats||{})},scopes:{...(cur.scopes||{})},...(cur.off?{off:true}:{})};
   fn(next);
   _setParentPhone(f,slot,next);
   save();renderNotifPrefModal();
   showToast('✓ ההעדפה נשמרה',1500);
 }
+// Off keeps the number and its choices, just stops all calls to it.
+function togglePhoneOn(slot,on){_editMyPhone(slot,n=>{if(on)delete n.off;else n.off=true;});}
 function togglePhoneCat(slot,id,on){_editMyPhone(slot,n=>{n.cats[id]=!!on;});}
 function setPhoneScope(slot,id,scope){_editMyPhone(slot,n=>{n.scopes[id]=scope;});}
 
@@ -3542,7 +3545,7 @@ async function renderNotifDevicesModal(){
       // Same rule as the server (api/_lib/yemot.js): only explicitly checked kinds call.
       const chosen=PHONE_CATS.filter(c=>cats[c.id]).map(c=>c.ico+' '+c.label);
       return`<div style="padding:10px 0;border-bottom:1px solid var(--border)">
-        <div style="font-size:13px;font-weight:700">${esc(_regDisplayName(f,slot))}</div>
+        <div style="font-size:13px;font-weight:700">${esc(_regDisplayName(f,slot))}${p.off?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔕 כבוי</span>':''}</div>
         <div style="font-size:11px;color:var(--text2);margin-top:2px;direction:ltr;text-align:right">📞 ${esc(p.phone)}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">${chosen.length?esc(chosen.join(' · ')):'לא סימנו אף התראה'}</div>
       </div>`;

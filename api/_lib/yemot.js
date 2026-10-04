@@ -43,7 +43,8 @@ function familyPhones(f) {
   [1, 2].forEach(slot => {
     const e = byslot[slot] || (slot === 1 && f.kosherPhone ? { phone: f.kosherPhone, cats: f.phonePref?.cats } : null);
     const phone = e && normalizePhone(e.phone);
-    if (phone) out.push({ phone, cats: e.cats || {}, scopes: e.scopes || {} });
+    // off: the parent turned calls off in the 🔔 window (number kept).
+    if (phone && !e.off) out.push({ phone, cats: e.cats || {}, scopes: e.scopes || {} });
   });
   return out;
 }
