@@ -13,6 +13,7 @@
 <link rel="apple-touch-icon" href="icon.jpg">
 <title>ינקלביץ</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="recipes.css">
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 </head>
 <body class="at-home">
@@ -60,6 +61,9 @@
       </button>
       <button class="fh-pill-btn" style="background:linear-gradient(135deg,#8FBC5A,#4E9A4E);box-shadow:0 4px 22px rgba(78,154,78,0.35)" onclick="openFamilyTreeOverlay()">
         <span class="fh-pill-ico">🌳</span>אילן יוחסין
+      </button>
+      <button class="fh-pill-btn" style="background:linear-gradient(135deg,#FBBF24,#E2711D);box-shadow:0 4px 22px rgba(226,113,29,0.35)" onclick="openRecipesOverlay()">
+        <span class="fh-pill-ico">🍲</span>מתכונים
       </button>
     </div>
     <!-- Family calendar card — below on mobile, right on desktop -->
@@ -497,6 +501,7 @@
 
 
 <script src="app.js"></script>
+<script src="recipes.js"></script>
 
 <!-- Add expense item modal (cumulative events) -->
 <div id="addExpItemOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1500;align-items:center;justify-content:center;padding:20px;box-sizing:border-box" onclick="if(event.target===this)closeAddExpItem()">
