@@ -630,7 +630,6 @@ body{font-family:"Varela Round",Arial,sans-serif;color:#1F1B17;direction:rtl;-we
 .cv-big{font-size:36pt;font-weight:700;line-height:1.15}
 .cv-line{width:30mm;height:.8mm;background:#1F1B17;margin:7mm auto;border-radius:1mm}
 .cv-ttl{font-size:14pt;font-weight:700;line-height:1.35;max-width:74mm}
-.cv-logo{width:24mm;height:24mm;border-radius:50%;object-fit:cover;margin-bottom:8mm;box-shadow:0 1mm 4mm rgba(0,0,0,.18)}
 .cv-yr{font-size:10pt;color:#7A6F64;margin-top:5mm}
 /* table of contents */
 .toc-h{text-align:center;font-weight:700;font-size:1.6em;margin-bottom:.5em}
@@ -673,7 +672,7 @@ function printScript(){
   const fits=b=>b.scrollHeight<=b.clientHeight+1;
   if(D.cover){
     const b=newCard('cover');
-    b.innerHTML=`${D.logo?`<img class="cv-logo" src="${D.logo}" alt="" onerror="this.remove()">`:''}<div class="cv-big">${esc(D.sub).replace(/ /g,'<br>')}</div><div class="cv-line"></div><div class="cv-ttl">${esc(D.title)}</div><div class="cv-yr">${esc(D.year)}</div>`;
+    b.innerHTML=`<div class="cv-big">${esc(D.sub).replace(/ /g,'<br>')}</div><div class="cv-line"></div><div class="cv-ttl">${esc(D.title)}</div><div class="cv-yr">${esc(D.year)}</div>`;
     padToFront();
   }
   // Table of contents — rows go in with placeholder numbers (filled in once
@@ -779,7 +778,7 @@ function openPrint(recipes,o){
   if(!w){toast('הדפדפן חסם את חלון ההדפסה — אפשרו חלונות קופצים');return;}
   const layout=o.layout==='a4'?'a4':'single';
   const data={recipes,layout,photos:o.photos!==false,cover:!!o.cover,toc:!!o.toc,autoPrint:!!o.autoPrint,imageMode:!!o.imageMode,
-    title:o.title||BOOK_TITLE,sub:o.sub||BOOK_SUB,logo:new URL('logo.jpg',location.href).href,
+    title:o.title||BOOK_TITLE,sub:o.sub||BOOK_SUB,
     year:hebYear()};
   const page=layout==='a4'?'A4 landscape':'99mm 210mm';
   const json=JSON.stringify(data).replace(/</g,'\\u003c');
