@@ -33,12 +33,13 @@ const shekels = n => {
 
 // Every phone saved on a family, including ones with calls turned off —
 // turning outgoing calls off shouldn't stop that parent from calling in.
-function findFamily(families, phone) {
+// Returns the family and which parent (slot 1/2) the number belongs to.
+function findCaller(families, phone) {
   for (const f of families || []) {
-    const nums = [];
-    Object.values(f.kosherPhones || {}).forEach(e => e && nums.push(e.phone));
-    if (f.kosherPhone) nums.push(f.kosherPhone);
-    if (nums.some(n => normalizePhone(n) === phone)) return f;
+    for (const slot of [1, 2]) {
+      const e = (f.kosherPhones || {})[slot] || (slot === 1 && f.kosherPhone ? { phone: f.kosherPhone } : null);
+      if (e && normalizePhone(e.phone) === phone) return { fam: f, slot };
+    }
   }
   return null;
 }
@@ -57,24 +58,27 @@ const famShort = f => clean(String(f.name || '').replace(/^משפחת\s*/, ''));
 // only after the matching answer to its condition question.
 const visibleQs = (p, votes) => p.questions.filter(q => !q.showIf || votes[q.showIf.qId] === q.showIf.optIdx);
 const openPollsFor = (polls, famId) => (polls || []).filter(p => !p.closed && Array.isArray(p.questions) && !(p.hiddenFrom || []).includes(famId));
-const pendingQs = (p, famId) => {
-  const votes = (p.votes && p.votes[String(famId)]) || {};
+// Each parent answers for themselves (same as the site): votes are keyed
+// "famId:slot"; an older family-wide vote (keyed by famId) still counts.
+const myVotes = (p, who) => (p.votes && (p.votes[who.key] || p.votes[String(who.famId)])) || {};
+const pendingQs = (p, who) => {
+  const votes = myVotes(p, who);
   return visibleQs(p, votes).filter(q => votes[q.id] == null && (q.options || []).length);
 };
 
-// The next question this family hasn't answered, newest poll first.
-function nextQuestion(polls, famId) {
-  for (const p of openPollsFor(polls, famId)) {
-    const q = pendingQs(p, famId)[0];
-    if (q) return { p, q, firstInPoll: !Object.keys((p.votes && p.votes[String(famId)]) || {}).length };
+// The next question this parent hasn't answered, newest poll first.
+function nextQuestion(polls, who) {
+  for (const p of openPollsFor(polls, who.famId)) {
+    const q = pendingQs(p, who)[0];
+    if (q) return { p, q, firstInPoll: !Object.keys(myVotes(p, who)).length };
   }
   return null;
 }
-const unansweredPolls = (polls, famId) => openPollsFor(polls, famId).filter(p => pendingQs(p, famId).length).length;
+const unansweredPolls = (polls, who) => openPollsFor(polls, who.famId).filter(p => pendingQs(p, who).length).length;
 
 // Saves the poll answers carried by this request that aren't saved yet, in a
 // transaction so a vote from the site at the same moment isn't lost.
-async function saveAnswers(db, famId, steps) {
+async function saveAnswers(db, who, steps) {
   const answers = {};
   steps.forEach(s => {
     const m = /^q(\d+)x(\d+)$/.exec(s.what);
@@ -86,9 +90,9 @@ async function saveAnswers(db, famId, steps) {
     const data = (await tx.get(ref)).data() || {};
     const polls = data.polls || [];
     let saved = 0;
-    for (const p of openPollsFor(polls, famId)) {
+    for (const p of openPollsFor(polls, who.famId)) {
       if (!p.votes) p.votes = {};
-      const votes = p.votes[String(famId)] || {};
+      const votes = { ...myVotes(p, who) };
       // In order, so a follow-up answered in this call counts once its
       // condition answer (also in this call) is in.
       for (const q of p.questions) {
@@ -100,7 +104,11 @@ async function saveAnswers(db, famId, steps) {
         votes[q.id] = idx;
         saved++;
       }
-      if (Object.keys(votes).length) p.votes[String(famId)] = votes;
+      if (Object.keys(votes).length && JSON.stringify(votes) !== JSON.stringify(myVotes(p, who))) {
+        p.votes[who.key] = votes;
+        // An old family-wide vote becomes this parent's own once they go on.
+        delete p.votes[String(who.famId)];
+      }
     }
     if (saved) tx.update(ref, { polls });
     return { saved, data };
@@ -183,7 +191,8 @@ module.exports = async (req, res) => {
   const db = getDb();
   const phone = normalizePhone(last(values.ApiPhone));
   const families = phone ? ((await db.doc('appData/familyPayments').get()).data() || {}).families : null;
-  const fam = phone && findFamily(families, phone);
+  const caller = phone && findCaller(families, phone);
+  const fam = caller && caller.fam;
   if (!fam) { bye(['המספר שממנו התקשרתם לא רשום באתר המשפחה', 'אפשר להוסיף אותו בעריכת המשפחה באתר']); return; }
 
   // Every key pressed so far in this call, in order.
@@ -193,14 +202,16 @@ module.exports = async (req, res) => {
   const step = steps.length ? steps[steps.length - 1] : null;
   const nextN = (step ? step.n : 0) + 1;
 
+  const who = { famId: fam.id, key: fam.id + ':' + caller.slot };
+  const firstName = clean((caller.slot === 2 ? fam.emailName2 : fam.emailName) || '');
   let saved = 0, data;
   try {
-    ({ saved, data } = await saveAnswers(db, fam.id, steps));
+    ({ saved, data } = await saveAnswers(db, who, steps));
   } catch (e) {
     console.error('yemot-ivr: saving answers failed', e);
     bye(['אירעה שגיאה בשמירת התשובה', 'נסו שוב מאוחר יותר']); return;
   }
-  if (saved) console.log(`yemot-ivr: family ${fam.id} saved ${saved} answer(s)`);
+  if (saved) console.log(`yemot-ivr: ${who.key} saved ${saved} answer(s)`);
   if (last(values.hangup) === 'yes') { send('ok'); return; }
 
   // read=<prompt>=<name>,<re-enter if exists>,<max>,<min>,<seconds>,<playback>,<block *>,<block 0>,<replace>,<allowed>,<attempts>,<allow empty>,<empty value>,<keyboard>
@@ -209,9 +220,9 @@ module.exports = async (req, res) => {
   ].join(','));
 
   const mainMenu = (pre = []) => {
-    const n = unansweredPolls(data.polls, fam.id);
+    const n = unansweredPolls(data.polls, who);
     read([...pre,
-      n ? (n === 1 ? 'יש סקר אחד שעוד לא עניתם עליו' : 'יש ' + n + ' סקרים שעוד לא עניתם עליהם') : '',
+      n ? (n === 1 ? 'יש סקר אחד שעוד לא ענית עליו' : 'יש ' + n + ' סקרים שעוד לא ענית עליהם') : '',
       'למידע מהאתר הקישו 1', 'לסקרים הקישו 2',
       RECORDINGS ? 'לשמיעת ההודעות המוקלטות של המשפחה הקישו 3' : '',
       RECORDINGS ? 'להשארת הודעה מוקלטת הקישו 4' : '',
@@ -222,11 +233,11 @@ module.exports = async (req, res) => {
     'למצב הארנק והחובות הקישו 1', 'לאירועים הפתוחים הקישו 2', 'לימי הולדת ושמחות קרובים הקישו 3',
     'לעדכונים האחרונים באתר הקישו 4', 'לחזרה לתפריט הראשי הקישו 0'], 'info', [1, 2, 3, 4, 0]);
   const askNext = (pre = []) => {
-    const next = nextQuestion(data.polls, fam.id);
+    const next = nextQuestion(data.polls, who);
     if (!next) {
       // Why each poll was skipped, for checking a "no polls" report.
-      console.log(`yemot-ivr: family ${fam.id} no question; polls: ` + (data.polls || []).map(p => {
-        const v = (p.votes && p.votes[String(fam.id)]) || {};
+      console.log(`yemot-ivr: ${who.key} no question; polls: ` + (data.polls || []).map(p => {
+        const v = myVotes(p, who);
         return `#${p.id}${p.closed ? ' closed' : ''}${(p.hiddenFrom || []).includes(fam.id) ? ' hidden' : ''} answered=${JSON.stringify(v)}`;
       }).join(' | '));
       mainMenu([...pre, 'אין עוד סקרים פתוחים שלא נענו']);
@@ -248,7 +259,7 @@ module.exports = async (req, res) => {
       inbox = snap.exists ? (snap.data().items || []).map(i => i.text) : [];
       if (inbox.length) await ref.delete();
     } catch (e) { console.error('yemot-ivr: phoneInbox failed', e); }
-    mainMenu(['שלום משפחת ' + famShort(fam),
+    mainMenu([firstName ? 'שלום ' + firstName : 'שלום משפחת ' + famShort(fam),
       ...(inbox.length ? [inbox.length === 1 ? 'יש לכם עדכון חדש' : 'יש לכם ' + inbox.length + ' עדכונים חדשים', ...inbox] : [])]);
     return;
   }

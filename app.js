@@ -3371,6 +3371,7 @@ function _npPhonePane(f,phones){
       +(p.off?'':`<div class="np-scope" style="margin:2px 0 6px">איך:
           <span class="np-seg" role="group"><button type="button" class="${p.mode!=='tzintuk'?'on':''}" onclick="setPhoneMode(${slot},'call')">שיחה מוקראת</button><button type="button" class="${p.mode==='tzintuk'?'on':''}" onclick="setPhoneMode(${slot},'tzintuk')">צינתוק</button></span></div>
         <div class="np-foot" style="margin:0 0 4px">${p.mode==='tzintuk'?'צלצול קצר מ־0772248443. כדי לשמוע מה חדש מתקשרים בחזרה למספר.':'שיחה שמקריאה את העדכון.'}</div>
+        ${p.testedTz?'':`<button type="button" onclick="sendMyTestTzintuk(${slot})" style="margin:2px 0 6px;padding:7px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">🔔 שלחו לי צינתוק בדיקה</button><div id="npTzStatus${slot}" class="np-foot" style="margin:0 0 4px"></div>`}
         <div class="np-sep"></div><div class="np-hint">על מה</div>`+_npCatList(PHONE_CATS,c=>!!cats[c.id],c=>scopes[c.id],'togglePhoneCat','setPhoneScope',slot+','))+`</div>`;
   }).join('')+`<div class="np-foot">אין שיחות בשבת ובחג. מה שקורה בלילה (22:00–08:00) מגיע בבוקר.</div>`;
 }
@@ -3378,7 +3379,7 @@ function _npPhonePane(f,phones){
 function _editMyPhone(slot,fn){
   const f=_myFam();if(!f)return;
   const cur=_parentPhone(f,slot);if(!cur)return;
-  const next={phone:cur.phone,cats:{...(cur.cats||{})},scopes:{...(cur.scopes||{})},...(cur.off?{off:true}:{}),...(cur.mode?{mode:cur.mode}:{})};
+  const next={phone:cur.phone,cats:{...(cur.cats||{})},scopes:{...(cur.scopes||{})},...(cur.off?{off:true}:{}),...(cur.mode?{mode:cur.mode}:{}),...(cur.testedTz?{testedTz:cur.testedTz}:{})};
   fn(next);
   _setParentPhone(f,slot,next);
   save();renderNotifPrefModal();
@@ -3389,6 +3390,21 @@ function togglePhoneOn(slot,on){
   const wasOff=!!_parentPhone(_myFam(),slot)?.off;
   _editMyPhone(slot,n=>{if(on)delete n.off;else n.off=true;});
   if(on&&wasOff)_notifyAdminSignup(_myFam(),slot,'הפעיל/ה שיחות לפלאפון הכשר');
+}
+// One test tzintuk per number, from the 🔔 window; once it went out the
+// button is gone (testedTz). The admin's person-modal test has no limit.
+async function sendMyTestTzintuk(slot){
+  const f=_myFam();const cur=f&&_parentPhone(f,slot);if(!cur)return;
+  const st=document.getElementById('npTzStatus'+slot);
+  const say=(t,c)=>{if(st){st.textContent=t;st.style.color=c||'var(--text2)';}};
+  say('שולח...');
+  try{
+    const r=await fetch('/api/phone-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminPass,phone:cur.phone,mode:'tzintuk'})});
+    const d=await r.json();
+    if(!d.ok){say(d.error==='shabbat'?'אין צינתוקים בשבת ובחג':'השליחה נכשלה: '+(d.error||r.status),'var(--red-mid)');return;}
+    _editMyPhone(slot,n=>{n.testedTz=Date.now();});
+    showToast('✓ הצינתוק יצא — כדי לשמוע את הודעת הבדיקה התקשרו ל־0772248443',4000);
+  }catch(e){say('השליחה נכשלה: '+e.message,'var(--red-mid)');}
 }
 // 'call' (default) or 'tzintuk': see api/_lib/yemot.js runTzintuk.
 function setPhoneMode(slot,mode){_editMyPhone(slot,n=>{if(mode==='tzintuk')n.mode='tzintuk';else delete n.mode;});}
@@ -4121,8 +4137,26 @@ const _visiblePolls=list=>{
 // answered its condition question with the matching option — everyone else
 // (and a question with no showIf at all) just sees it normally.
 function _pollVisibleQuestions(p,famId){
-  const myVotes=(famId!=null&&p.votes[String(famId)])||{};
+  const myVotes=famId!=null?_myPollVotes(p):{};
   return p.questions.filter(q=>!q.showIf||myVotes[q.showIf.qId]===q.showIf.optIdx);
+}
+// Each parent answers for themselves: votes are keyed "famId:slot" (the
+// email slot this device logged in with). A vote from before this, keyed by
+// the family alone, still counts as theirs until they answer again.
+function _myVoteKey(){
+  const fid=_myFamId();
+  return fid!=null?fid+':'+(_myEmailSlot()||1):null;
+}
+function _myPollVotes(p){
+  const key=_myVoteKey();if(!key)return{};
+  return p.votes[key]||p.votes[String(_myFamId())]||{};
+}
+// Who a votes key belongs to: the parent's name, or the family for an old
+// family-wide vote.
+function _pollVoterName(key){
+  const [fid,slot]=String(key).split(':');
+  const f=getFam(parseInt(fid));if(!f)return'?';
+  return slot?(_regDisplayName(f,parseInt(slot))||f.name.replace('משפחת','').trim()):f.name.replace('משפחת','').trim();
 }
 // Families who owe an equal share of this goal fund: everyone who can see
 // it (not in hiddenFrom) MINUS anyone marked as not participating in the
@@ -4191,7 +4225,7 @@ function renderPollBanner(){
   const fid=_myFamId();
   // "Waiting to be filled" if any currently-visible question (including one
   // just revealed by an earlier answer) hasn't been answered yet.
-  const myVotes=v=>(fid!=null&&v.votes[String(fid)])||{};
+  const myVotes=v=>fid!=null?_myPollVotes(v):{};
   const unanswered=p=>fid==null||_pollVisibleQuestions(p,fid).some(q=>myVotes(p)[q.id]==null);
   const poll=openPolls.find(unanswered)||openPolls[0];
   const voted=fid!=null&&!unanswered(poll);
@@ -4349,8 +4383,11 @@ function saveNewPoll(){
 function votePoll(pollId,qId,optIdx){
   const p=polls.find(x=>x.id===pollId);if(!p||p.closed)return;
   const fid=_myFamId();if(fid==null){alert('לא זוהתה משפחה במכשיר זה');return;}
-  if(!p.votes[String(fid)])p.votes[String(fid)]={};
-  p.votes[String(fid)][qId]=optIdx;
+  const key=_myVoteKey();
+  // An old family-wide vote becomes this parent's own once they go on.
+  if(!p.votes[key]&&p.votes[String(fid)]){p.votes[key]=p.votes[String(fid)];delete p.votes[String(fid)];}
+  if(!p.votes[key])p.votes[key]={};
+  p.votes[key][qId]=optIdx;
   save();renderPollList();
 }
 function togglePollClosed(pollId){
@@ -4372,7 +4409,7 @@ function renderPollList(){
   }
   const myFid=_myFamId();
   el.innerHTML=list.map(p=>{
-    const myVotes=(myFid!=null&&p.votes[String(myFid)])||{};
+    const myVotes=myFid!=null?_myPollVotes(p):{};
     const visibleQs=_pollVisibleQuestions(p,myFid);
     const isMulti=p.questions.length>1;
     // Anonymous polls hide who-voted-what from everyone except the admin —
@@ -4388,7 +4425,7 @@ function renderPollList(){
       const myVote=myVotes[q.id];
       const showResults=p.closed||myVote!=null;
       const votersFor=i=>Object.entries(p.votes).filter(([,v])=>v[q.id]===i)
-        .map(([fid])=>{const f=getFam(parseInt(fid));return f?f.name.replace('משפחת','').trim():'?';});
+        .map(([key])=>_pollVoterName(key));
       const optsHtml=q.options.map((opt,i)=>{
         const count=Object.values(p.votes).filter(v=>v[q.id]===i).length;
         const pct=totalVotes?Math.round(count/totalVotes*100):0;
@@ -5782,7 +5819,7 @@ function _renderPersonPhoneSection(f,slot){
     <input type="tel" id="personKosherPhone" inputmode="tel" autocomplete="tel" placeholder="מספר טלפון, למשל 0527123456" value="${esc(cur?.phone||'')}"
       style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 12px;font-size:14px;font-family:var(--font);background:var(--bg);color:var(--text);box-sizing:border-box;direction:ltr;text-align:right">
     <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.5">מה יגיע בשיחה בוחרים בכפתור ההתראות 🔔 למעלה.</div>
-    ${editMode?`<button type="button" onclick="testKosherPhoneCall()" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">📞 שיחת בדיקה למספר הזה</button> <button type="button" onclick="testKosherPhoneCall('tzintuk')" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">🔔 צינתוק בדיקה</button><div id="personPhoneTestStatus" style="font-size:12px;margin-top:6px"></div>`:''}`;
+    ${editMode?`<button type="button" onclick="testKosherPhoneCall('tzintuk')" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">🔔 צינתוק בדיקה</button><div id="personPhoneTestStatus" style="font-size:12px;margin-top:6px"></div>`:''}`;
 }
 async function testKosherPhoneCall(mode){
   const st=document.getElementById('personPhoneTestStatus');
