@@ -3378,6 +3378,10 @@ async function openNotifDevicesModal(){
 function closeNotifDevicesModal(){
   document.getElementById('notifDevicesModal').style.display='none';
 }
+// Three tabs — who gets push (registered devices), email (opted-in
+// addresses) and spoken calls (parents' kosher phones).
+let _notifRegTab='push';
+function setNotifRegTab(t){_notifRegTab=t;renderNotifDevicesModal();}
 async function renderNotifDevicesModal(){
   const el=document.getElementById('notifDevicesModalContent');if(!el)return;
   try{
@@ -3418,37 +3422,42 @@ async function renderNotifDevicesModal(){
         <button onclick="deleteNotifDevice('${r.id}')" style="background:none;border:none;color:var(--red-mid);cursor:pointer;font-size:16px;padding:4px;flex-shrink:0" title="מחק רישום">🗑</button>
       </div>`;
     }).join(''):'<div class="empty" style="padding:20px 0"><span class="empty-ico">📱</span>אין מכשירים רשומים לפוש</div>';
-    // Email is a per-REGISTERED-EMAIL choice (notifEmailPref on the family
-    // record, keyed by slot 1/2 — see notifEmailSection), not a per-family
-    // or per-device fcmTokens doc like the push list above, so it's listed
-    // separately here, one row per opted-in email address rather than one
-    // per family.
     const emailRows=[];
     families.forEach(f=>{
       if(!f.notifEmailPref)return;
-      [1,2].forEach(slot=>{
-        const pref=f.notifEmailPref[slot];if(!pref)return;
-        emailRows.push({f,slot,pref});
-      });
+      [1,2].forEach(slot=>{ const pref=f.notifEmailPref[slot];if(pref)emailRows.push({f,slot,pref}); });
     });
-    const emailHtml=emailRows.length?`
-      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
-        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">📧 רשומים למייל במקום פוש</div>
-        ${emailRows.map(({f,slot,pref})=>{
-          const who=_regDisplayName(f,slot);
-          const email=(slot===2?f.email2:f.email)||'אין כתובת מייל';
-          const catLabels=NOTIF_EMAIL_CATS.filter(c=>pref.cats[c.id]!==false).map(c=>{
-            const scope=NOTIF_EMAIL_SCOPED_CATS.has(c.id)&&pref.scopes?.[c.id]==='mine'?' (רק שלי)':'';
-            return c.ico+' '+c.label+scope;
-          });
-          return`<div style="padding:10px 0;border-bottom:1px solid var(--border)">
-            <div style="font-size:13px;font-weight:700">${esc(who)}</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">${esc(email)}</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">${catLabels.length?esc(catLabels.join(' · ')):'לא סימנו אף קטגוריה'}</div>
-          </div>`;
-        }).join('')}
-      </div>`:'';
-    el.innerHTML=devicesHtml+emailHtml;
+    const emailHtml=emailRows.length?emailRows.map(({f,slot,pref})=>{
+      const who=_regDisplayName(f,slot);
+      const email=(slot===2?f.email2:f.email)||'אין כתובת מייל';
+      const catLabels=NOTIF_EMAIL_CATS.filter(c=>_notifEmailCatOn(pref,c.id)).map(c=>{
+        const scope=NOTIF_EMAIL_SCOPED_CATS.has(c.id)&&pref.scopes?.[c.id]==='mine'?' (רק שלי)':'';
+        return c.ico+' '+c.label+scope;
+      });
+      return`<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:700">${esc(who)}${pref.push!==true?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔕 רק מייל</span>':''}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">${esc(email)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">${catLabels.length?esc(catLabels.join(' · ')):'לא סימנו אף קטגוריה'}</div>
+      </div>`;
+    }).join(''):'<div class="empty" style="padding:20px 0"><span class="empty-ico">📧</span>אף אחד לא רשום להתראות במייל</div>';
+    const phoneRows=[];
+    families.forEach(f=>[1,2].forEach(slot=>{ const p=_parentPhone(f,slot);if(p&&p.phone)phoneRows.push({f,slot,p}); }));
+    const phoneHtml=phoneRows.length?phoneRows.map(({f,slot,p})=>{
+      const cats=p.cats||{};
+      // Same rule as the server (api/_lib/yemot.js): only explicitly checked kinds call.
+      const chosen=PHONE_CATS.filter(c=>cats[c.id]).map(c=>c.ico+' '+c.label);
+      return`<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:700">${esc(_regDisplayName(f,slot))}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px;direction:ltr;text-align:right">📞 ${esc(p.phone)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">${chosen.length?esc(chosen.join(' · ')):'לא סימנו אף התראה'}</div>
+      </div>`;
+    }).join(''):'<div class="empty" style="padding:20px 0"><span class="empty-ico">📞</span>אף אחד לא רשום לשיחות לטלפון כשר</div>';
+    const tabs=[['push','🔔 פוש',rows.length],['email','📧 מייל',emailRows.length],['phone','📞 שיחה',phoneRows.length]];
+    const tabsHtml=`<div style="display:flex;gap:6px;margin-bottom:12px">${tabs.map(([id,label,n])=>{
+      const on=_notifRegTab===id;
+      return`<button type="button" onclick="setNotifRegTab('${id}')" style="flex:1;padding:8px 4px;border-radius:20px;border:1.5px solid ${on?'var(--blue-mid)':'var(--border)'};background:${on?'var(--blue-mid)':'transparent'};color:${on?'#fff':'var(--text2)'};font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer">${label} <span style="opacity:.8">(${n})</span></button>`;
+    }).join('')}</div>`;
+    el.innerHTML=tabsHtml+(_notifRegTab==='email'?emailHtml:_notifRegTab==='phone'?phoneHtml:devicesHtml);
   }catch(e){
     el.innerHTML='<div style="padding:20px;text-align:center;color:var(--red-mid);font-size:13px">שגיאה בטעינה: '+esc(e.message||'')+'</div>';
   }
