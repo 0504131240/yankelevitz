@@ -3368,14 +3368,17 @@ function _npPhonePane(f,phones){
     const name=(slot===2?f.emailName2:f.emailName)||(slot===2?'הורה 2':'הורה 1');
     const cats=p.cats||{},scopes=p.scopes||{};
     return`<div class="np-phone">`+_npSwitch(!p.off,`togglePhoneOn(${slot},this.checked)`,`📞 קבל שיחות – ${esc(name)}`,`<span dir="ltr">${esc(p.phone)}</span>`)
-      +(p.off?'':`<div class="np-sep"></div><div class="np-hint">מה יגיע בשיחה</div>`+_npCatList(PHONE_CATS,c=>!!cats[c.id],c=>scopes[c.id],'togglePhoneCat','setPhoneScope',slot+','))+`</div>`;
+      +(p.off?'':`<div class="np-scope" style="margin:2px 0 6px">איך:
+          <span class="np-seg" role="group"><button type="button" class="${p.mode!=='tzintuk'?'on':''}" onclick="setPhoneMode(${slot},'call')">שיחה מוקראת</button><button type="button" class="${p.mode==='tzintuk'?'on':''}" onclick="setPhoneMode(${slot},'tzintuk')">צינתוק</button></span></div>
+        <div class="np-foot" style="margin:0 0 4px">${p.mode==='tzintuk'?'צלצול קצר מ־0772248443. כדי לשמוע מה חדש מתקשרים בחזרה למספר.':'שיחה שמקריאה את העדכון.'}</div>
+        <div class="np-sep"></div><div class="np-hint">על מה</div>`+_npCatList(PHONE_CATS,c=>!!cats[c.id],c=>scopes[c.id],'togglePhoneCat','setPhoneScope',slot+','))+`</div>`;
   }).join('')+`<div class="np-foot">אין שיחות בשבת ובחג. מה שקורה בלילה (22:00–08:00) מגיע בבוקר.</div>`;
 }
 // Server rule (api/_lib/yemot.js): only explicitly checked kinds call.
 function _editMyPhone(slot,fn){
   const f=_myFam();if(!f)return;
   const cur=_parentPhone(f,slot);if(!cur)return;
-  const next={phone:cur.phone,cats:{...(cur.cats||{})},scopes:{...(cur.scopes||{})},...(cur.off?{off:true}:{})};
+  const next={phone:cur.phone,cats:{...(cur.cats||{})},scopes:{...(cur.scopes||{})},...(cur.off?{off:true}:{}),...(cur.mode?{mode:cur.mode}:{})};
   fn(next);
   _setParentPhone(f,slot,next);
   save();renderNotifPrefModal();
@@ -3387,6 +3390,8 @@ function togglePhoneOn(slot,on){
   _editMyPhone(slot,n=>{if(on)delete n.off;else n.off=true;});
   if(on&&wasOff)_notifyAdminSignup(_myFam(),slot,'הפעיל/ה שיחות לפלאפון הכשר');
 }
+// 'call' (default) or 'tzintuk': see api/_lib/yemot.js runTzintuk.
+function setPhoneMode(slot,mode){_editMyPhone(slot,n=>{if(mode==='tzintuk')n.mode='tzintuk';else delete n.mode;});}
 function togglePhoneCat(slot,id,on){_editMyPhone(slot,n=>{n.cats[id]=!!on;});}
 function setPhoneScope(slot,id,scope){_editMyPhone(slot,n=>{n.scopes[id]=scope;});}
 
@@ -3564,7 +3569,7 @@ async function renderNotifDevicesModal(){
       // Same rule as the server (api/_lib/yemot.js): only explicitly checked kinds call.
       const chosen=PHONE_CATS.filter(c=>cats[c.id]).map(c=>c.ico+' '+c.label);
       return`<div style="padding:10px 0;border-bottom:1px solid var(--border)">
-        <div style="font-size:13px;font-weight:700">${esc(_regDisplayName(f,slot))}${p.off?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔕 כבוי</span>':''}</div>
+        <div style="font-size:13px;font-weight:700">${esc(_regDisplayName(f,slot))}${p.off?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔕 כבוי</span>':''}${!p.off&&p.mode==='tzintuk'?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔔 צינתוק</span>':''}</div>
         <div style="font-size:11px;color:var(--text2);margin-top:2px;direction:ltr;text-align:right">📞 ${esc(p.phone)}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">${chosen.length?esc(chosen.join(' · ')):'לא סימנו אף התראה'}</div>
       </div>`;
@@ -5777,19 +5782,19 @@ function _renderPersonPhoneSection(f,slot){
     <input type="tel" id="personKosherPhone" inputmode="tel" autocomplete="tel" placeholder="מספר טלפון, למשל 0527123456" value="${esc(cur?.phone||'')}"
       style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 12px;font-size:14px;font-family:var(--font);background:var(--bg);color:var(--text);box-sizing:border-box;direction:ltr;text-align:right">
     <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.5">מה יגיע בשיחה בוחרים בכפתור ההתראות 🔔 למעלה.</div>
-    ${editMode?`<button type="button" onclick="testKosherPhoneCall()" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">📞 שיחת בדיקה למספר הזה</button><div id="personPhoneTestStatus" style="font-size:12px;margin-top:6px"></div>`:''}`;
+    ${editMode?`<button type="button" onclick="testKosherPhoneCall()" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">📞 שיחת בדיקה למספר הזה</button> <button type="button" onclick="testKosherPhoneCall('tzintuk')" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">🔔 צינתוק בדיקה</button><div id="personPhoneTestStatus" style="font-size:12px;margin-top:6px"></div>`:''}`;
 }
-async function testKosherPhoneCall(){
+async function testKosherPhoneCall(mode){
   const st=document.getElementById('personPhoneTestStatus');
   const say=(t,c)=>{if(st){st.textContent=t;st.style.color=c||'var(--text2)';}};
   const phone=_normPhone(document.getElementById('personKosherPhone')?.value);
   if(!phone){say('מספר הטלפון לא תקין','var(--red-mid)');return;}
   say('מתקשר...');
   try{
-    const r=await fetch('/api/phone-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminPass,phone})});
+    const r=await fetch('/api/phone-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminPass,phone,mode:mode||'call'})});
     const d=await r.json();
     const msgs={'not-configured':'פרטי ימות המשיח עוד לא הוגדרו ב-Vercel','shabbat':'אין שיחות בשבת ובחג','bad-phone':'מספר הטלפון לא תקין'};
-    if(d.ok)say('✓ השיחה יצאה — הטלפון אמור לצלצל עכשיו','var(--green)');
+    if(d.ok)say(mode==='tzintuk'?'✓ הצינתוק יצא — הטלפון אמור לצלצל צלצול קצר. התקשרו בחזרה ל־0772248443 כדי לשמוע את הודעת הבדיקה.':'✓ השיחה יצאה — הטלפון אמור לצלצל עכשיו','var(--green)');
     else say(msgs[d.error]||('השיחה נכשלה: '+(d.error||r.status)),'var(--red-mid)');
   }catch(e){say('השיחה נכשלה: '+e.message,'var(--red-mid)');}
 }

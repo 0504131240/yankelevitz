@@ -238,7 +238,20 @@ module.exports = async (req, res) => {
     read([...pre, firstInPoll ? 'סקר חדש' : '', q.text, ...choices], 'q' + p.id + 'x' + q.id, q.options.map((_, i) => i + 1));
   };
 
-  if (!step) { mainMenu(['שלום משפחת ' + famShort(fam)]); return; }
+  if (!step) {
+    // Updates that arrived as a tzintuk (api/_lib/yemot.js runTzintuk) are
+    // read out first, once.
+    let inbox = [];
+    try {
+      const ref = db.collection('phoneInbox').doc(phone);
+      const snap = await ref.get();
+      inbox = snap.exists ? (snap.data().items || []).map(i => i.text) : [];
+      if (inbox.length) await ref.delete();
+    } catch (e) { console.error('yemot-ivr: phoneInbox failed', e); }
+    mainMenu(['שלום משפחת ' + famShort(fam),
+      ...(inbox.length ? [inbox.length === 1 ? 'יש לכם עדכון חדש' : 'יש לכם ' + inbox.length + ' עדכונים חדשים', ...inbox] : [])]);
+    return;
+  }
   if (step.what === 'main') {
     if (step.digit === '1') infoMenu();
     else if (step.digit === '2') askNext();

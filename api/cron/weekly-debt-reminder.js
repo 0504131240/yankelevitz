@@ -79,7 +79,7 @@ async function sendWeeklyDebtReminders(db, data) {
     const credit = Math.max(0, grossDebt - totalDebt);
 
     familyPhones(fam).filter(p => p.cats.debt).forEach(p => {
-      phoneEntries.push({ phone: p.phone, text: `תזכורת שבועית: למשפחת ${famName} יש חוב פתוח של ${totalDebt} שקלים` });
+      phoneEntries.push({ phone: p.phone, text: `תזכורת שבועית: למשפחת ${famName} יש חוב פתוח של ${totalDebt} שקלים`, mode: p.mode });
     });
 
     const addrs = [fam.email, fam.email2].filter(Boolean);

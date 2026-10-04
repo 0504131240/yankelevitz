@@ -44,7 +44,9 @@ function familyPhones(f) {
     const e = byslot[slot] || (slot === 1 && f.kosherPhone ? { phone: f.kosherPhone, cats: f.phonePref?.cats } : null);
     const phone = e && normalizePhone(e.phone);
     // off: the parent turned calls off in the 🔔 window (number kept).
-    if (phone && !e.off) out.push({ phone, cats: e.cats || {}, scopes: e.scopes || {} });
+    // mode: 'call' (spoken call, the default) or 'tzintuk' (a short missed
+    // call; the updates wait in phoneInbox until they call the line back).
+    if (phone && !e.off) out.push({ phone, cats: e.cats || {}, scopes: e.scopes || {}, mode: e.mode === 'tzintuk' ? 'tzintuk' : 'call' });
   });
   return out;
 }
@@ -75,7 +77,7 @@ function phoneEntriesFor(families, kind, { target, excludeFamIds, relatedFamIds,
     familyPhones(f).forEach(p => {
       if (!p.cats[pref]) return;
       if (ONLY_MINE.has(pref) && !related) return;
-      out.push({ phone: p.phone, text: spoken });
+      out.push({ phone: p.phone, text: spoken, mode: p.mode });
     });
   });
   return out;
@@ -87,9 +89,41 @@ function isQuietHours() {
   return h >= 22 || h < 8;
 }
 
+// A tzintuk: the phone rings once from the line's number and hangs up. The
+// messages are kept in phoneInbox/{phone} and read out first when that
+// number calls the line (api/yemot-ivr.js).
+async function runTzintuk(db, entries) {
+  if (!yemotConfigured() || !entries.length) return { tzintuks: 0 };
+  const byPhone = {};
+  entries.forEach(e => { (byPhone[e.phone] || (byPhone[e.phone] = [])).push(e.text); });
+  if (db) {
+    await Promise.all(Object.entries(byPhone).map(async ([phone, texts]) => {
+      const ref = db.collection('phoneInbox').doc(phone);
+      const snap = await ref.get();
+      const items = (snap.exists ? snap.data().items || [] : []).filter(i => Date.now() - (i.ts || 0) < 14 * 86400000);
+      texts.forEach(text => { if (!items.some(i => i.text === text)) items.push({ text, ts: Date.now() }); });
+      await ref.set({ items: items.slice(-20) });
+    }));
+  }
+  const params = new URLSearchParams({ token: process.env.YEMOT_TOKEN, phones: Object.keys(byPhone).join(':') });
+  if (process.env.YEMOT_CALLER_ID) params.set('callerId', process.env.YEMOT_CALLER_ID);
+  const resp = await fetch(API + 'RunTzintuk?' + params.toString());
+  const data = await resp.json().catch(() => ({}));
+  if (data.responseStatus !== 'OK') throw new Error('Yemot RunTzintuk failed: ' + (data.message || resp.status));
+  return { tzintuks: Object.keys(byPhone).length };
+}
+
+// Spoken calls for 'call' entries and a tzintuk for 'tzintuk' ones.
+async function runYemotCalls(entries, db) {
+  const tz = entries.filter(e => e.mode === 'tzintuk');
+  const calls = entries.filter(e => e.mode !== 'tzintuk');
+  const [a, b] = await Promise.all([runSpokenCalls(calls), runTzintuk(db, tz)]);
+  return { ...a, ...b };
+}
+
 // One call per number; several messages for the same number are read in a
 // row, and the same message twice (two parents sharing a phone) only once.
-async function runYemotCalls(entries) {
+async function runSpokenCalls(entries) {
   if (!yemotConfigured() || !entries.length) return { calls: 0 };
   const byPhone = {};
   entries.forEach(e => {
@@ -120,7 +154,7 @@ async function callOrQueue(db, entries) {
     await batch.commit();
     return { queued: entries.length };
   }
-  return runYemotCalls(entries);
+  return runYemotCalls(entries, db);
 }
 
 // Morning run: everything queued overnight, plus the given entries, in one
@@ -129,10 +163,10 @@ async function flushPhoneQueue(db, extraEntries = []) {
   if (!yemotConfigured()) return { calls: 0 };
   const snap = await db.collection('phoneQueue').get();
   const fresh = snap.docs.map(d => d.data()).filter(e => Date.now() - (e.ts || 0) < 3 * 86400000);
-  const entries = fresh.map(e => ({ phone: e.phone, text: e.text })).concat(extraEntries);
-  const result = entries.length ? await runYemotCalls(entries) : { calls: 0 };
+  const entries = fresh.map(e => ({ phone: e.phone, text: e.text, mode: e.mode || 'call' })).concat(extraEntries);
+  const result = entries.length ? await runYemotCalls(entries, db) : { calls: 0 };
   await Promise.all(snap.docs.map(d => d.ref.delete()));
   return result;
 }
 
-module.exports = { yemotConfigured, speakable, normalizePhone, familyPhones, phoneEntriesFor, isQuietHours, runYemotCalls, callOrQueue, flushPhoneQueue };
+module.exports = { yemotConfigured, speakable, normalizePhone, familyPhones, phoneEntriesFor, isQuietHours, runYemotCalls, runTzintuk, callOrQueue, flushPhoneQueue };
