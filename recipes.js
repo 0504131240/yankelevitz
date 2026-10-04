@@ -76,9 +76,25 @@ function askName(){
 }
 function isAdmin(){try{return typeof editMode!=='undefined'&&!!editMode;}catch(e){return false;}}
 function canDelete(r){return isAdmin()||r.deviceId===deviceId();}
-function catOf(id){return CATS.find(c=>c.id===id)||CATS[CATS.length-1];}
+function catOf(id){return CATS.find(c=>c.id===id)||(id?{id,lbl:id,ico:'🏷️'}:CATS[CATS.length-1]);}
+// Recipes saved before multi-category support have only `category`.
+function catsOf(r){return Array.isArray(r.categories)&&r.categories.length?r.categories:[r.category||'other'];}
+function catLabels(r){return catsOf(r).map(c=>catOf(c).lbl).join(', ');}
+const byLabel=(a,b)=>String(a).localeCompare(String(b),'he');
+function allCats(extra){
+  const custom=new Set();
+  S.recipes.forEach(r=>catsOf(r).forEach(c=>{if(!CATS.some(x=>x.id===c))custom.add(c);}));
+  (extra||[]).forEach(c=>{if(c&&!CATS.some(x=>x.id===c))custom.add(c);});
+  return [...CATS,...[...custom].sort(byLabel).map(catOf)];
+}
+function allTags(extra){
+  const custom=new Set();
+  S.recipes.forEach(r=>(r.tags||[]).forEach(t=>{if(!HOLIDAYS.some(x=>x.id===t))custom.add(t);}));
+  (extra||[]).forEach(t=>{if(t&&!HOLIDAYS.some(x=>x.id===t))custom.add(t);});
+  return [...HOLIDAYS,...[...custom].sort(byLabel).map(holOf)];
+}
 function kosherOf(id){return KOSHER.find(k=>k.id===id);}
-function holOf(id){return HOLIDAYS.find(h=>h.id===id);}
+function holOf(id){return HOLIDAYS.find(h=>h.id===id)||(id?{id,lbl:id,ico:'✨'}:undefined);}
 function fmtMin(m){m=+m||0;if(!m)return'';if(m<60)return m+' דק׳';const h=Math.floor(m/60),r=m%60;return (h===1?'שעה':h===2?'שעתיים':h+' שעות')+(r?` ו-${r} דק׳`:'');}
 function totalMin(r){return (+r.prepMin||0)+(+r.cookMin||0);}
 function ago(ts){
@@ -335,12 +351,12 @@ function filtered(){
   const q=S.q.trim().toLowerCase(),f=favs();
   let list=S.recipes.filter(r=>{
     if(S.cat==='fav'&&!f.has(r.id))return false;
-    if(S.cat!=='all'&&S.cat!=='fav'&&r.category!==S.cat)return false;
+    if(S.cat!=='all'&&S.cat!=='fav'&&!catsOf(r).includes(S.cat))return false;
     if(S.kosher&&r.kosher!==S.kosher)return false;
     if(S.holiday&&!(r.tags||[]).includes(S.holiday))return false;
     if(S.cook&&(r.origin||'').trim()!==S.cook)return false;
     if(q){
-      const hay=[r.title,r.ingredients,r.origin,r.story,r.createdBy,catOf(r.category).lbl,...(r.tags||[]).map(t=>(holOf(t)||{}).lbl)].join(' ').toLowerCase();
+      const hay=[r.title,r.ingredients,r.origin,r.story,r.createdBy,catLabels(r),...(r.tags||[]).map(t=>(holOf(t)||{}).lbl)].join(' ').toLowerCase();
       if(!q.split(/\s+/).every(w=>hay.includes(w)))return false;
     }
     return true;
@@ -356,7 +372,7 @@ function filtered(){
 function cardHtml(r,f,i){
   const k=kosherOf(r.kosher),t=totalMin(r);
   return `<button class="rc-card" style="animation-delay:${Math.min(i,12)*25}ms" onclick="rcOpenRecipe('${E(r.id)}')">
-    <div class="rc-card-img" style="${r.photo?'':grad(r)}">${r.photo?`<img src="${r.photo}" alt="" loading="lazy">`:E(r.emoji||catOf(r.category).ico)}
+    <div class="rc-card-img" style="${r.photo?'':grad(r)}">${r.photo?`<img src="${r.photo}" alt="" loading="lazy">`:E(r.emoji||catOf(catsOf(r)[0]).ico)}
       ${f.has(r.id)?'<span class="rc-card-fav">⭐</span>':''}
       ${k?`<span class="rc-card-k k-${k.id}">${k.lbl}</span>`:''}
     </div>
@@ -396,15 +412,15 @@ function renderList(){
         <span class="rc-cook-av" style="background:${avColor(n)}">${ph?`<img src="${ph}" alt="">`:E(n.replace(/^(סבתא|סבא|דודה|דוד)\s+/,'').charAt(0))}</span>
         <span class="rc-cook-nm">${E(n)}</span><span class="rc-cook-ct">${c} מתכונים</span></button>`;}).join('')}</div>`;
   }
-  const used=new Set(S.recipes.map(r=>r.category));
+  const used=new Set(S.recipes.flatMap(catsOf)),usedTags=new Set(S.recipes.flatMap(r=>r.tags||[]));
   h+=`<div class="rc-chips">
     <button class="rc-chip${S.cat==='all'?' on':''}" onclick="rcSet('cat','all')">הכל</button>
     <button class="rc-chip${S.cat==='fav'?' on':''}" onclick="rcSet('cat','fav')">⭐ מועדפים</button>
-    ${CATS.filter(c=>used.has(c.id)).map(c=>`<button class="rc-chip${S.cat===c.id?' on':''}" onclick="rcSet('cat','${c.id}')">${c.ico} ${c.lbl}</button>`).join('')}
+    ${allCats().filter(c=>used.has(c.id)).map(c=>`<button class="rc-chip${S.cat===c.id?' on':''}" data-v="${E(c.id)}" onclick="rcSet('cat',this.dataset.v)">${c.ico} ${E(c.lbl)}</button>`).join('')}
   </div>
   <div class="rc-chips">
     ${KOSHER.map(k=>`<button class="rc-chip k-${k.id}${S.kosher===k.id?' on':''}" onclick="rcSet('kosher','${k.id}')">${k.lbl}</button>`).join('')}
-    ${HOLIDAYS.filter(x=>S.recipes.some(r=>(r.tags||[]).includes(x.id))).map(x=>`<button class="rc-chip${S.holiday===x.id?' on':''}" onclick="rcSet('holiday','${x.id}')">${x.ico} ${x.lbl}</button>`).join('')}
+    ${allTags().filter(x=>usedTags.has(x.id)).map(x=>`<button class="rc-chip${S.holiday===x.id?' on':''}" data-v="${E(x.id)}" onclick="rcSet('holiday',this.dataset.v)">${x.ico} ${E(x.lbl)}</button>`).join('')}
   </div>
   <div class="rc-toolbar">
     <span class="rc-count">${list.length===S.recipes.length?`${list.length} מתכונים`:`נמצאו ${list.length} מתוך ${S.recipes.length}`}${(S.cook||S.holiday||S.kosher||S.cat!=='all'||S.q)?' · <a href="#" onclick="rcResetFilters();return false" style="color:var(--rc-accent2);font-weight:800">נקה סינון</a>':''}</span>
@@ -463,10 +479,10 @@ function renderPage(){
   const made=r.madeBy||[];
   const madeNames=[...new Set(made.map(m=>m.name).filter(Boolean))];
   box.innerHTML=`
-  <div class="rc-hero" style="${r.photo?'':grad(r)}">${r.photo?`<img src="${r.photo}" alt="" onclick="rcZoom(this.src)" style="cursor:zoom-in">`:E(r.emoji||catOf(r.category).ico)}
+  <div class="rc-hero" style="${r.photo?'':grad(r)}">${r.photo?`<img src="${r.photo}" alt="" onclick="rcZoom(this.src)" style="cursor:zoom-in">`:E(r.emoji||catOf(catsOf(r)[0]).ico)}
     <div class="rc-hero-bar"><button class="rc-ibtn" onclick="rcClosePage()" title="חזרה">→</button><button class="rc-ibtn" onclick="rcOpenEditor('${E(r.id)}')" title="עריכה">✏️</button></div>
     <div class="rc-hero-ttl"><h1>${E(r.title)}</h1>
-      <div>${r.origin?`מהמטבח של <button onclick="rcFilterCook()">${E(r.origin)}</button> · `:''}${catOf(r.category).ico} ${catOf(r.category).lbl}</div></div>
+      <div>${r.origin?`מהמטבח של <button onclick="rcFilterCook()">${E(r.origin)}</button> · `:''}${catOf(catsOf(r)[0]).ico} ${E(catLabels(r))}</div></div>
   </div>
   <div class="rc-detail">
     <div class="rc-metas">
@@ -475,7 +491,7 @@ function renderPage(){
       ${base?`<div class="rc-meta"><b>${base}</b><span>מנות</span></div>`:''}
       ${r.difficulty?`<div class="rc-meta"><b>${'🔥'.repeat(r.difficulty)}</b><span>${DIFF[r.difficulty]}</span></div>`:''}
       ${k?`<div class="rc-meta"><b class="k-${k.id}" style="padding:1px 10px;border-radius:10px">${k.lbl}</b><span>כשרות</span></div>`:''}
-      ${(r.tags||[]).length?`<div class="rc-meta"><b>${r.tags.map(t=>(holOf(t)||{}).ico||'').join(' ')}</b><span>${r.tags.map(t=>(holOf(t)||{}).lbl||'').join(', ')}</span></div>`:''}
+      ${(r.tags||[]).length?`<div class="rc-meta"><b>${r.tags.map(t=>(holOf(t)||{}).ico||'').join(' ')}</b><span>${E(r.tags.map(t=>(holOf(t)||{}).lbl||'').join(', '))}</span></div>`:''}
     </div>
     <div class="rc-actions">
       <button class="rc-act${f.has(r.id)?' on':''}" onclick="rcFav(this)"><i>${f.has(r.id)?'⭐':'☆'}</i>מועדף</button>
@@ -566,7 +582,7 @@ const BOOK_TITLE='ספר המתכונים של משפחת ינקלביץ';
 const BOOK_SUB='הכי טעים בבית';
 function printData(r,scale){
   return {
-    title:r.title||'',origin:r.origin||'',photo:r.photo||null,cat:catOf(r.category).lbl,
+    title:r.title||'',origin:r.origin||'',photo:r.photo||null,cat:catOf(catsOf(r)[0]).lbl,
     ings:ingLines(r).map(l=>l.sec?{sec:l.text}:scaleLine(l.text,scale)),
     steps:stepLines(r),note:r.tips||''
   };
@@ -799,7 +815,8 @@ window.rcMakeBook=function(){
   let list=which==='filtered'?filtered():which==='fav'?S.recipes.filter(r=>favs().has(r.id)):S.recipes.slice();
   if(!list.length){toast('אין מתכונים בבחירה הזו');return;}
   const ord=new Map(CATS.map((c,i)=>[c.id,i]));
-  list=list.slice().sort((a,b)=>(ord.get(a.category)??99)-(ord.get(b.category)??99)||String(a.title).localeCompare(String(b.title),'he'));
+  const c0=r=>catsOf(r)[0];
+  list=list.slice().sort((a,b)=>(ord.get(c0(a))??99)-(ord.get(c0(b))??99)||byLabel(catOf(c0(a)).lbl,catOf(c0(b)).lbl)||byLabel(a.title,b.title));
   rcCloseModal('rcBookModal');
   openPrint(list.map(r=>printData(r,1)),{...o,cover:true,toc:true});
 };
@@ -953,8 +970,8 @@ window.rcRandom=function(){
   modal.classList.add('open');
   let n=0;const spins=pool.length>1?9:1;
   body.classList.add('rc-spin');
-  const show=r=>{window._rcRandId=r.id;body.innerHTML=`<div class="rc-rand"><div class="rc-rand-card"><div class="rc-rand-img" style="${r.photo?'':grad(r)}">${r.photo?`<img src="${r.photo}" alt="">`:E(r.emoji||catOf(r.category).ico)}</div>
-    <div class="rc-rand-ttl">${E(r.title)}</div><div class="rc-rand-sub">${[r.origin&&('👵 '+E(r.origin)),totalMin(r)&&('⏱ '+fmtMin(totalMin(r))),catOf(r.category).lbl].filter(Boolean).join(' · ')}</div></div></div>`;};
+  const show=r=>{window._rcRandId=r.id;body.innerHTML=`<div class="rc-rand"><div class="rc-rand-card"><div class="rc-rand-img" style="${r.photo?'':grad(r)}">${r.photo?`<img src="${r.photo}" alt="">`:E(r.emoji||catOf(catsOf(r)[0]).ico)}</div>
+    <div class="rc-rand-ttl">${E(r.title)}</div><div class="rc-rand-sub">${[r.origin&&('👵 '+E(r.origin)),totalMin(r)&&('⏱ '+fmtMin(totalMin(r))),E(catLabels(r))].filter(Boolean).join(' · ')}</div></div></div>`;};
   let prev=null;
   const step=()=>{
     let r;do{r=pool[Math.floor(Math.random()*pool.length)];}while(pool.length>1&&r===prev);
@@ -967,7 +984,7 @@ window.rcRandom=function(){
 // ── editor ─────────────────────────────────────────────────────────────────
 window.rcOpenEditor=function(id){
   const r=id?S.recipes.find(x=>x.id===id):null;
-  S.edit=r?JSON.parse(JSON.stringify(r)):{id:null,title:'',emoji:'',category:'',kosher:'',tags:[],prepMin:'',cookMin:'',servings:'',difficulty:0,ingredients:'',steps:'',story:'',origin:'',tips:''};
+  S.edit=r?{...JSON.parse(JSON.stringify(r)),categories:catsOf(r).filter(c=>c!=='other'||catsOf(r).length===1)}:{id:null,title:'',emoji:'',categories:[],kosher:'',tags:[],prepMin:'',cookMin:'',servings:'',difficulty:0,ingredients:'',steps:'',story:'',origin:'',tips:''};
   S.editPhoto=r?r.photo||null:null;S.editScan=r?r.scan||null:null;
   $('rcEditTtl').textContent=r?'עריכת מתכון':'✨ מתכון חדש';
   $('rcEditDel').style.display=r&&canDelete(r)?'':'none';
@@ -983,7 +1000,7 @@ function renderEditor(){
   const e=S.edit;
   const pick=(key,opts,multi)=>`<div class="rc-pick">${opts.map(o=>{
     const on=multi?(e[key]||[]).includes(o.id):e[key]===o.id;
-    return `<button type="button" class="${on?'on':''}" onclick="rcEdPick('${key}','${o.id}',${multi?1:0})">${o.ico?o.ico+' ':''}${o.lbl}</button>`;}).join('')}</div>`;
+    return `<button type="button" class="${on?'on':''}" data-v="${E(o.id)}" onclick="rcEdPick('${key}',this.dataset.v,${multi?1:0})">${o.ico?o.ico+' ':''}${E(o.lbl)}</button>`;}).join('')}${multi?`<button type="button" class="rc-pick-add" onclick="rcEdAdd('${key}')">＋ חדש</button>`:''}</div>`;
   const names=[...new Set([...treeNames(),...cooks().map(c=>c[0])])];
   $('rcEditBody').innerHTML=`
     ${SCAN_ENABLED?`<div class="rc-scanbox${S.scanning?' busy':''}">
@@ -1000,13 +1017,13 @@ function renderEditor(){
     <div class="rc-f"><label>אייקון ${S.editPhoto?'(מוצג כשאין תמונה)':''}</label><div class="rc-emojis">${EMOJIS.map(x=>`<button type="button" class="${e.emoji===x?'on':''}" onclick="rcEdPick('emoji','${x}',0)">${x}</button>`).join('')}</div></div>
     <div class="rc-f"><label>מהמטבח של...</label><input type="text" id="rcEdOrigin" list="rcNames" value="${E(e.origin)}" placeholder="סבתא רחל, דודה מירי, אמא...">
       <datalist id="rcNames">${names.map(n=>`<option value="${E(n)}">`).join('')}</datalist><small>של מי המתכון במקור? כך אפשר לראות את כל המתכונים של כל אחד.</small></div>
-    <div class="rc-f"><label>קטגוריה</label>${pick('category',CATS,false)}</div>
+    <div class="rc-f"><label>קטגוריה <span class="rc-hint">(אפשר לבחור כמה)</span></label>${pick('categories',allCats(e.categories),true)}</div>
     <div class="rc-f"><label>כשרות</label>${pick('kosher',KOSHER,false)}</div>
-    <div class="rc-f"><label>מתאים ל...</label>${pick('tags',HOLIDAYS,true)}</div>
+    <div class="rc-f"><label>מתאים ל... <span class="rc-hint">(אפשר לבחור כמה)</span></label>${pick('tags',allTags(e.tags),true)}</div>
     <div class="rc-row">
-      <div class="rc-f"><label>הכנה (דק׳)</label><input type="number" min="0" inputmode="numeric" id="rcEdPrep" value="${E(e.prepMin)}"></div>
-      <div class="rc-f"><label>בישול (דק׳)</label><input type="number" min="0" inputmode="numeric" id="rcEdCook" value="${E(e.cookMin)}"></div>
-      <div class="rc-f"><label>מנות</label><input type="number" min="0" inputmode="numeric" id="rcEdServ" value="${E(e.servings)}"></div>
+      <div class="rc-f"><label>הכנה (דק׳)</label><input type="number" min="0" inputmode="numeric" id="rcEdPrep" value="${E(e.prepMin||'')}"></div>
+      <div class="rc-f"><label>בישול (דק׳)</label><input type="number" min="0" inputmode="numeric" id="rcEdCook" value="${E(e.cookMin||'')}"></div>
+      <div class="rc-f"><label>מנות</label><input type="number" min="0" inputmode="numeric" id="rcEdServ" value="${E(e.servings||'')}"></div>
     </div>
     <div class="rc-f"><label>רמת קושי</label>${pick('difficulty',[{id:1,lbl:'🔥 קל'},{id:2,lbl:'🔥🔥 בינוני'},{id:3,lbl:'🔥🔥🔥 מאתגר'}],false)}</div>
     <div class="rc-f"><label>מצרכים</label><textarea id="rcEdIng" rows="7" placeholder="3 כוסות קמח&#10;1/2 כוס סוכר&#10;2 ביצים&#10;&#10;לציפוי:&#10;100 גרם שוקולד">${E(e.ingredients)}</textarea>
@@ -1030,6 +1047,19 @@ window.rcEdPick=function(key,val,multi){
   if(key==='difficulty')val=+val;
   if(multi){const a=e[key]||[];e[key]=a.includes(val)?a.filter(x=>x!==val):a.concat(val);}
   else e[key]=e[key]===val?(key==='difficulty'?0:''):val;
+  const st=$('rcEditBody').scrollTop;renderEditor();$('rcEditBody').scrollTop=st;
+};
+// "+ new" next to categories / tags: the typed name becomes a selectable
+// option for this recipe, and from then on for every recipe that uses it.
+window.rcEdAdd=function(key){
+  readEditor();
+  const isCat=key==='categories';
+  let name=(prompt(isCat?'שם הקטגוריה החדשה (למשל: פשטידות)':'מתאים ל... (למשל: יום הולדת, ארוחת בוקר)')||'').trim().replace(/\s+/g,' ').slice(0,30);
+  if(!name)return;
+  const known=(isCat?CATS:HOLIDAYS).find(x=>x.lbl===name);
+  if(known)name=known.id;
+  const e=S.edit,a=e[key]||[];
+  if(!a.includes(name))e[key]=a.concat(name);
   const st=$('rcEditBody').scrollTop;renderEditor();$('rcEditBody').scrollTop=st;
 };
 let _photoSlot='photo';
@@ -1091,7 +1121,7 @@ window.rcScanFiles=async function(inp){
     if(x.servings)e.servings=x.servings;
     if(x.prepMin)e.prepMin=x.prepMin;
     if(x.cookMin)e.cookMin=x.cookMin;
-    if(x.category&&CATS.some(c=>c.id===x.category))e.category=x.category;
+    if(x.category&&CATS.some(c=>c.id===x.category)&&!(e.categories||[]).includes(x.category))e.categories=(e.categories||[]).concat(x.category);
     if(x.kosher)e.kosher=x.kosher;
     if((x.tags||[]).length)e.tags=[...new Set([...(e.tags||[]),...x.tags.filter(t=>holOf(t))])];
     if(x.tips)e.tips=e.tips?e.tips+'\n'+x.tips:x.tips;
@@ -1116,7 +1146,7 @@ window.rcSaveRecipe=async function(){
   // is normalised to '' / 0 / null / [] here.
   const r={
     id:e.id||('r'+now.toString(36)+Math.random().toString(36).slice(2,6)),
-    title:e.title,emoji:e.emoji||'',category:e.category||'other',kosher:e.kosher||'',tags:e.tags||[],
+    title:e.title,emoji:e.emoji||'',categories:(e.categories||[]).length?e.categories:['other'],category:(e.categories||[])[0]||'other',kosher:e.kosher||'',tags:e.tags||[],
     prepMin:+e.prepMin||0,cookMin:+e.cookMin||0,servings:+e.servings||0,difficulty:+e.difficulty||0,
     ingredients:e.ingredients||'',steps:e.steps||'',story:e.story||'',origin:e.origin||'',tips:e.tips||'',
     photo:S.editPhoto||null,scan:S.editScan||null,
@@ -1129,7 +1159,7 @@ window.rcSaveRecipe=async function(){
     await S.store.put(r,isNew);
     rcCloseEditor();
     toast(isNew?'🎉 המתכון נוסף לספר המשפחתי!':'✓ המתכון עודכן');
-    if(isNew){S.recipes.push(r);celebrate();}
+    if(isNew){if(!S.recipes.some(x=>x.id===r.id))S.recipes.push(r);celebrate();}
     rcOpenRecipe(r.id);
   }catch(err){console.warn(err);toast('⚠️ השמירה נכשלה: '+(err.code||err.message||''));}
   finally{btn.disabled=false;btn.textContent='שמירה';}
