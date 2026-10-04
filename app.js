@@ -3883,9 +3883,8 @@ function renderCalEvList(hebDays,bdayByDate,yahrByDate,annivByDate){
       // calendar, unlike the birthday case just above which already got
       // this right.
       const years=item.hebYear?(hebYNum-item.hebYear):null;
-      // Deliberately open to everyone, not just admins — unlike the
-      // anniversary button below, this only ever touches the yahrzeit
-      // entry itself (never a whole family's details).
+      // Deliberately open to everyone, not just admins — this only ever
+      // touches the yahrzeit entry itself (never a whole family's details).
       return`<div class="fh-cal-ev">
         <div class="fh-cal-ev-dot" style="background:#555"></div>
         <div class="fh-cal-ev-info">
@@ -3900,17 +3899,13 @@ function renderCalEvList(hebDays,bdayByDate,yahrByDate,annivByDate){
       // Same fix as the yahrzeit case above — use this occurrence's own
       // Hebrew year, not today's.
       const years=item.hebYear?(hebYNum-item.hebYear):null;
-      // item.id is the family's own id (see allAnniversaries) — this button
-      // opens the FULL family edit sheet, not just the anniversary, so it's
-      // admin-or-own-family only, same as everywhere else that link appears.
-      const canEdit=editMode||_myFamId()===item.id;
+      // No edit button here — the wedding date is edited from the family card.
       return`<div class="fh-cal-ev">
         <div class="fh-cal-ev-dot" style="background:#B8860B"></div>
         <div class="fh-cal-ev-info">
           <div class="fh-cal-ev-name">💍 ${esc(item.name)} — יום נישואין${years!=null&&years>0?' ('+years+' שנים)':''}</div>
           <div class="fh-cal-ev-date">${lbl}</div>
         </div>
-        ${canEdit?`<button onclick="openFamEditSheet(${item.id})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:0 4px;opacity:.5">✏️</button>`:''}
       </div>`;
     }
     return`<div class="fh-cal-ev">
