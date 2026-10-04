@@ -105,13 +105,23 @@ module.exports = async (req, res) => {
   if (saved) console.log(`yemot-ivr: family ${fam.id} saved ${saved} answer(s)`);
   if (values.hangup === 'yes') { send('ok'); return; }
 
+  const famName = clean(String(fam.name || '').replace(/^משפחת\s*/, ''));
   const next = nextQuestion(polls, fam.id);
   if (!next) {
-    bye(saved ? 'תודה רבה התשובות נשמרו' : 'אין כרגע סקרים פתוחים שלא עניתם עליהם', 'להתראות');
+    // Why each poll was skipped, for checking a "no polls" report.
+    console.log(`yemot-ivr: family ${fam.id} no question; polls: ` + (polls || []).map(p => {
+      const v = (p.votes && p.votes[String(fam.id)]) || {};
+      return `#${p.id}${p.closed ? ' closed' : ''}${(p.hiddenFrom || []).includes(fam.id) ? ' hidden' : ''} answered=${JSON.stringify(v)} qs=${(p.questions || []).length}`;
+    }).join(' | '));
+    bye(saved ? 'תודה רבה התשובות נשמרו' : 'למשפחת ' + famName + ' אין כרגע סקרים פתוחים שלא נענו', 'להתראות');
     return;
   }
   const { p, q, firstInPoll } = next;
-  const intro = firstInPoll ? ['סקר חדש מאתר המשפחה'] : [];
+  // The family name on the first question of the call, so it's clear which
+  // family this phone is registered to.
+  const intro = [];
+  if (!Object.keys(values).some(k => k.startsWith('q_'))) intro.push('שלום משפחת ' + famName);
+  if (firstInPoll) intro.push('סקר חדש מאתר המשפחה');
   // "לכן הקישו 1"; a numeric answer reads better without the ל ("3 הקישו 3").
   const choices = q.options.map((o, i) => (/^\d/.test(clean(o)) ? '' : 'ל') + clean(o) + ' הקישו ' + (i + 1));
   const allowed = q.options.map((_, i) => i + 1).join('.');
