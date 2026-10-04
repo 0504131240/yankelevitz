@@ -75,10 +75,22 @@ function parseJson(text) {
   return JSON.parse(t);
 }
 
+// "High demand" (503) from Gemini is usually a passing spike: try twice
+// more, a moment apart, then GEMINI_FALLBACK_MODEL if one is set.
 async function callGemini(parts, withSchema) {
+  const models = [MODEL, MODEL, MODEL, process.env.GEMINI_FALLBACK_MODEL].filter(Boolean);
+  let res;
+  for (let i = 0; i < models.length; i++) {
+    if (i) await new Promise(r => setTimeout(r, i === 1 ? 800 : 1600));
+    res = await callGeminiOnce(models[i], parts, withSchema);
+    if (res.status !== 503) break;
+  }
+  return res;
+}
+async function callGeminiOnce(model, parts, withSchema) {
   const generationConfig = { responseMimeType: 'application/json' };
   if (withSchema) generationConfig.responseJsonSchema = SCHEMA;
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:generateContent`, {
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
     body: JSON.stringify({
@@ -118,7 +130,7 @@ module.exports = async (req, res) => {
     if (status === 400 && /responseJsonSchema|response_json_schema|Unknown name/i.test(JSON.stringify(data))) {
       ({ status, data } = await callGemini(parts, false));
     }
-    if (status === 429) { res.status(429).json({ error: 'busy, try again' }); return; }
+    if (status === 429 || status === 503) { res.status(429).json({ error: 'busy, try again' }); return; }
     if (status !== 200) {
       console.error('recipe-scan: gemini', status, JSON.stringify(data).slice(0, 500));
       res.status(502).json({ error: 'ai error ' + status });
