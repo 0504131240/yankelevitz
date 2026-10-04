@@ -3382,7 +3382,11 @@ function _editMyPhone(slot,fn){
   showToast('✓ ההעדפה נשמרה',1500);
 }
 // Off keeps the number and its choices, just stops all calls to it.
-function togglePhoneOn(slot,on){_editMyPhone(slot,n=>{if(on)delete n.off;else n.off=true;});}
+function togglePhoneOn(slot,on){
+  const wasOff=!!_parentPhone(_myFam(),slot)?.off;
+  _editMyPhone(slot,n=>{if(on)delete n.off;else n.off=true;});
+  if(on&&wasOff)_notifyAdminSignup(_myFam(),slot,'הפעיל/ה שיחות לפלאפון הכשר');
+}
 function togglePhoneCat(slot,id,on){_editMyPhone(slot,n=>{n.cats[id]=!!on;});}
 function setPhoneScope(slot,id,scope){_editMyPhone(slot,n=>{n.scopes[id]=scope;});}
 
@@ -3431,13 +3435,28 @@ function _myEmailSlot(){
   if(_isAdminPage())return null;
   return parseInt(localStorage.getItem('deviceEmailSlot3')||'1');
 }
+// Tells the admin (bell + admin push, never email) when a family member
+// signs up for email or kosher-phone notifications. Not when the admin
+// sets it up themselves.
+function _notifyAdminSignup(f,slot,text){
+  if(editMode||!f)return;
+  addNotif('📝',(_regDisplayName(f,slot)||f.name)+' '+text,'admin',undefined,'familyEdit');
+  // The bell here shows every entry to every family; hide this one from all
+  // of them (the admin sees everything). Not passed to addNotif's
+  // hiddenFromFamIds, which would also drop the push to an admin device
+  // that's registered under a family.
+  if(notifications[0])notifications[0].hiddenFrom=families.map(x=>x.id).filter(id=>id!=null);
+}
 function toggleNotifEmailMode(on){
   const fid=_myFamId();const f=fid!=null?getFam(fid):null;
   const slot=_myEmailSlot();
   if(!f||!slot)return;
   if(on){
     if(!f.notifEmailPref)f.notifEmailPref={};
-    if(!f.notifEmailPref[slot])f.notifEmailPref[slot]={cats:Object.fromEntries(NOTIF_EMAIL_CATS.map(c=>[c.id,c.def!==false])),scopes:{},push:true};
+    if(!f.notifEmailPref[slot]){
+      f.notifEmailPref[slot]={cats:Object.fromEntries(NOTIF_EMAIL_CATS.map(c=>[c.id,c.def!==false])),scopes:{},push:true};
+      _notifyAdminSignup(f,slot,'נרשמ/ה להתראות במייל');
+    }
   }else if(f.notifEmailPref){
     delete f.notifEmailPref[slot];
     if(!Object.keys(f.notifEmailPref).length)f.notifEmailPref=null;
@@ -6181,6 +6200,7 @@ function savePerson(){
       verified.delete(prevEmail);
       localStorage.setItem('verifiedEmails',JSON.stringify([...verified]));
     }
+    if(phone&&(!prevPhone||_normPhone(prevPhone.phone)!==phone))_notifyAdminSignup(f,isP1?1:2,'נרשמ/ה לשיחות לפלאפון הכשר ('+phone+')');
     const bdayField=isP1?'parent1Bday':'parent2Bday';
     if(bday)f[bdayField]={...bday};else delete f[bdayField];
   }else{
