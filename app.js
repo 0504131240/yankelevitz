@@ -406,14 +406,85 @@ async function _uploadEmailImage(dataUrl){
   if(!r.ok||!d.id)throw new Error(r.status===401?'סיסמת הניהול לא אושרה':(d.error||('שגיאה '+r.status)));
   return location.origin+'/api/email-img?id='+d.id;
 }
+// Who a broadcast goes to: every saved address (each parent separately) by
+// default, or the ones picked in the recipients window. _bcSel holds the
+// picked addresses (lower-case); null means everyone.
+let _bcSel=null;
+function _bcAllAddrs(){
+  const out=[],seen=new Set();
+  families.forEach(f=>[1,2].forEach(slot=>{
+    const email=((slot===2?f.email2:f.email)||'').trim();
+    if(!_validEmail(email)||seen.has(email.toLowerCase()))return;
+    seen.add(email.toLowerCase());
+    out.push({key:email.toLowerCase(),email,famId:f.id,name:f.name.replace('משפחת','').trim(),person:_regDisplayName(f,slot)||f.name.replace('משפחת','').trim()});
+  }));
+  return out;
+}
+const _bcChosen=()=>_bcAllAddrs().filter(a=>!_bcSel||_bcSel.has(a.key));
+function _renderBcHint(){
+  const hint=document.getElementById('broadcastHint');if(!hint)return;
+  const all=_bcAllAddrs(),n=_bcChosen().length;
+  const sendBtn=document.querySelector('#broadcastModal button[onclick="sendBroadcastEmail()"]');
+  if(sendBtn)sendBtn.textContent=!_bcSel?'📧 שלח לכולם':`📧 שלח ל-${n} נמענים`;
+  if(!all.length){hint.textContent='אין משפחות עם כתובת מייל שמורה';return;}
+  hint.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+    <span>${n===all.length?`יישלח לכולם (${all.length} כתובות)`:`יישלח ל-${n} מתוך ${all.length} כתובות`}</span>
+    <button type="button" onclick="openBcRecipients()" style="padding:5px 12px;border-radius:20px;border:1.5px solid var(--blue-mid);background:transparent;color:var(--blue-mid);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">👥 בחירת נמענים</button>
+  </div>`;
+}
+function openBcRecipients(){
+  let m=document.getElementById('bcRecipModal');
+  if(!m){
+    m=document.createElement('div');m.id='bcRecipModal';
+    m.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2800;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
+    m.onclick=e=>{if(e.target===m)closeBcRecipients();};
+    document.body.appendChild(m);
+  }
+  _renderBcRecipients();
+  m.style.display='flex';
+}
+function closeBcRecipients(){const m=document.getElementById('bcRecipModal');if(m)m.style.display='none';_renderBcHint();}
+function _renderBcRecipients(){
+  const m=document.getElementById('bcRecipModal');if(!m)return;
+  const all=_bcAllAddrs(),on=a=>!_bcSel||_bcSel.has(a.key);
+  const fams=[];all.forEach(a=>{let g=fams.find(x=>x.famId===a.famId);if(!g)fams.push(g={famId:a.famId,name:a.name,addrs:[]});g.addrs.push(a);});
+  const n=all.filter(on).length;
+  m.innerHTML=`<div style="background:var(--surface);border-radius:var(--r);width:100%;max-width:400px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+      <span style="flex:1;font-size:15px;font-weight:800;color:var(--text)">👥 למי לשלוח? <span style="font-size:12px;font-weight:600;color:var(--text2)">${n}/${all.length}</span></span>
+      <button type="button" onclick="bcSelectAll(true)" style="border:none;background:none;color:var(--blue-mid);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">הכל</button>
+      <button type="button" onclick="bcSelectAll(false)" style="border:none;background:none;color:var(--text2);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">נקה</button>
+    </div>
+    <div style="overflow-y:auto;padding:6px 16px">${fams.map(g=>{
+      const allOn=g.addrs.every(on),someOn=g.addrs.some(on);
+      return`<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:800;color:var(--text)">
+          <input type="checkbox" ${allOn?'checked':''} ${!allOn&&someOn?'data-mixed="1"':''} onchange="bcToggleFam(${g.famId},this.checked)"> ${esc(g.name)}</label>
+        ${g.addrs.map(a=>`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 24px 0 0;font-size:12px;color:var(--text2)">
+          <input type="checkbox" ${on(a)?'checked':''} onchange="bcToggleAddr('${esc(a.key)}',this.checked)">
+          <span style="flex:1;min-width:0"><b style="color:var(--text)">${esc(a.person)}</b> · <span dir="ltr">${esc(a.email)}</span></span></label>`).join('')}
+      </div>`;}).join('')}</div>
+    <div style="padding:12px 16px;border-top:1px solid var(--border)">
+      <button type="button" onclick="closeBcRecipients()" style="width:100%;padding:11px;border-radius:var(--r2);border:none;background:var(--blue-mid);color:#fff;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer">אישור (${n} נמענים)</button>
+    </div>
+  </div>`;
+  m.querySelectorAll('input[data-mixed]').forEach(i=>{i.indeterminate=true;});
+}
+function _bcSet(keys,on){
+  if(!_bcSel)_bcSel=new Set(_bcAllAddrs().map(a=>a.key));
+  keys.forEach(k=>on?_bcSel.add(k):_bcSel.delete(k));
+  if(_bcSel.size===_bcAllAddrs().length)_bcSel=null;
+  _renderBcRecipients();
+}
+function bcToggleAddr(key,on){_bcSet([key],on);}
+function bcToggleFam(famId,on){_bcSet(_bcAllAddrs().filter(a=>a.famId===famId).map(a=>a.key),on);}
+function bcSelectAll(on){_bcSel=on?null:new Set();_renderBcRecipients();}
 function openBroadcastModal(){
   _ensureBroadcastImagesUI();_bcImages=[];_renderBroadcastImages();
   const subjEl=document.getElementById('broadcastSubject');if(subjEl)subjEl.value='';
   const msgEl=document.getElementById('broadcastMsg');if(msgEl)msgEl.value='';
   const err=document.getElementById('broadcastErr');if(err)err.style.display='none';
-  const cnt=families.filter(f=>f.email||f.email2).length;
-  const hint=document.getElementById('broadcastHint');
-  if(hint)hint.textContent=cnt?`יישלח ל-${cnt} משפחות עם כתובת מייל שמורה`:'אין משפחות עם כתובת מייל שמורה';
+  _bcSel=null;_renderBcHint();
   document.getElementById('broadcastModal').style.display='flex';
 }
 function closeBroadcastModal(){
@@ -450,8 +521,8 @@ async function sendBroadcastEmail(){
   const msg=(document.getElementById('broadcastMsg')?.value||'').trim();
   const err=document.getElementById('broadcastErr');
   if(!subject||!msg){if(err){err.textContent='נא למלא נושא ותוכן';err.style.display='block';}return;}
-  const recipients=families.filter(f=>f.email||f.email2).map(f=>({email:f.email,email2:f.email2,name:f.name.replace('משפחת','').trim()}));
-  if(!recipients.length){if(err){err.textContent='אין משפחות עם כתובת מייל שמורה';err.style.display='block';}return;}
+  const recipients=_bcChosen().map(a=>({email:a.email,name:a.name}));
+  if(!recipients.length){if(err){err.textContent=_bcAllAddrs().length?'לא נבחר אף נמען':'אין משפחות עם כתובת מייל שמורה';err.style.display='block';}return;}
   if(err)err.style.display='none';
   let urls=[];
   if(_bcImages.length){
@@ -463,7 +534,7 @@ async function sendBroadcastEmail(){
   const plain=msg.replace(/\[תמונה\s*(\d+)\]/g,'(תמונה $1)');
   sendEmailNotif(recipients,subject,plain,html);
   closeBroadcastModal();
-  showToast('📧 ההודעה נשלחה לכולם');
+  showToast(_bcSel?`📧 ההודעה נשלחה ל-${recipients.length} נמענים`:'📧 ההודעה נשלחה לכולם');
 }
 function openSiteUpdateModal(){
   const inp=document.getElementById('siteUpdateText');if(inp)inp.value='';
