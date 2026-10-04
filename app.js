@@ -6859,7 +6859,9 @@ async function doCreate(){
     const ev=events.find(e=>e.id===editingId);
     if(ev){
       ev.name=name; ev.date=date; if(dateISO)ev.dateISO=dateISO;else delete ev.dateISO; ev.participants=participants; ev.excluded=excluded;
-      ev.splitMethod=splitMethod; ev.childOverrides=childOverrides; ev.parentOverrides=parentOverrides;
+      // A cumulative event's form forces "equal" (setExpMode) and hides the
+      // choice, so editing one must keep the split method it already has.
+      ev.splitMethod=ev.cumulative?(ev.splitMethod||'equal'):splitMethod; ev.childOverrides=childOverrides; ev.parentOverrides=parentOverrides;
       if(hasMarried)ev.marriedIn=marriedIn;else delete ev.marriedIn;
       if(!ev.cumulative){
         ev.totalCost=totalCost;
