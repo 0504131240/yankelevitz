@@ -6403,7 +6403,8 @@ function _shbParsha(d){
 function _shbTitle(d){const p=_shbParsha(d);if(!p)return 'שבת '+_shbHeb(d);return /^(ראש השנה|יום כיפור|סוכות|שמחת תורה|פסח|חול המועד)/.test(p)?'שבת '+p:'פרשת '+p;}
 function _shbHeb(d){try{return new Intl.DateTimeFormat('he-IL-u-ca-hebrew',{day:'numeric',month:'long'}).format(d);}catch(e){return '';}}
 function _shbLat(d){return d.getDate()+'.'+(d.getMonth()+1);}
-function _shbVisitors(){const h=_shbHost();return families.filter(f=>!h||f.id!==h.id);}
+// Sub-families (a married child's household, e.g. וסרמן) visit as part of the parents' family, so only the main families are listed.
+function _shbVisitors(){const h=_shbHost();return families.filter(f=>!f.subFamily&&(!h||f.id!==h.id));}
 function _shbShort(f){return f.name.replace('משפחת','').trim();}
 function _shbFams(key){return ((shabbatVisits[key]||{}).fams||[]).map(getFam).filter(Boolean);}
 function renderShabbatPill(){
