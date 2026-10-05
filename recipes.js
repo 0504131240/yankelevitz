@@ -290,10 +290,7 @@ function build(){
     <div class="rc-sheet">
       <div class="rc-sheet-hd"><b>🎲 מה נבשל היום?</b><button class="rc-x" onclick="rcCloseModal('rcRandModal')">✕</button></div>
       <div class="rc-sheet-bd" id="rcRandBody"></div>
-      <div class="rc-sheet-ft">
-        <button class="rc-btn ghost" onclick="rcRandom()">🎲 עוד הגרלה</button>
-        <button class="rc-btn" onclick="rcCloseModal('rcRandModal');rcOpenRecipe(window._rcRandId)">פתח מתכון</button>
-      </div>
+      <div class="rc-sheet-ft" id="rcRandFt"></div>
     </div>
   </div>
 
@@ -1073,17 +1070,43 @@ window.rcShopShare=async function(){
 };
 
 // ── random pick ────────────────────────────────────────────────────────────
+// Step 1: pick which categories to draw from (remembered per device; none
+// picked = everything). Step 2: the draw.
+let _randRun=0;
+function randCats(){return lsGet('rcRandCats',[]).filter(c=>S.recipes.some(r=>catsOf(r).includes(c)));}
+function randPool(){const sel=randCats();return sel.length?S.recipes.filter(r=>catsOf(r).some(c=>sel.includes(c))):S.recipes;}
 window.rcRandom=function(){
-  const pool=filtered().length?filtered():S.recipes;
-  if(!pool.length){toast('אין עדיין מתכונים להגרלה');return;}
-  const modal=$('rcRandModal'),body=$('rcRandBody');
-  modal.classList.add('open');
+  if(!S.recipes.length){toast('אין עדיין מתכונים להגרלה');return;}
+  _randRun++;
+  const used=new Set(S.recipes.flatMap(catsOf)),sel=randCats();
+  const count=c=>S.recipes.filter(r=>catsOf(r).includes(c)).length;
+  $('rcRandBody').classList.remove('rc-spin');
+  $('rcRandBody').innerHTML=`<div class="rc-rand-q">מאיזה קטגוריות להגריל?</div>
+    <div class="rc-pick rc-rand-cats">${allCats().filter(c=>used.has(c.id)).map(c=>`<button type="button" class="${sel.includes(c.id)?'on':''}" data-v="${E(c.id)}" onclick="rcRandToggle(this)">${c.ico} ${E(c.lbl)} <small>${count(c.id)}</small></button>`).join('')}</div>
+    <div class="rc-rand-hint" id="rcRandHint"></div>`;
+  $('rcRandFt').innerHTML=`<button class="rc-btn ghost" onclick="rcCloseModal('rcRandModal')">ביטול</button><button class="rc-btn" onclick="rcRandDraw()">🎲 הגרילו!</button>`;
+  randHint();
+  $('rcRandModal').classList.add('open');
+};
+function randHint(){const sel=randCats(),n=randPool().length;$('rcRandHint').textContent=sel.length?`ההגרלה מתוך ${n} מתכונים`:`לא נבחרה קטגוריה — ההגרלה מתוך כל ${n} המתכונים`;}
+window.rcRandToggle=function(btn){
+  const v=btn.dataset.v,sel=new Set(randCats());
+  sel.has(v)?sel.delete(v):sel.add(v);
+  lsSet('rcRandCats',[...sel]);btn.classList.toggle('on',sel.has(v));randHint();
+};
+window.rcRandDraw=function(){
+  const pool=randPool();
+  if(!pool.length){toast('אין מתכונים בקטגוריות שנבחרו');return;}
+  const body=$('rcRandBody');
+  $('rcRandFt').innerHTML=`<button class="rc-btn ghost" style="flex:none;padding:13px 14px" onclick="rcRandom()" title="שינוי קטגוריות">⚙️</button><button class="rc-btn ghost" onclick="rcRandDraw()">🎲 עוד הגרלה</button><button class="rc-btn" onclick="rcCloseModal('rcRandModal');rcOpenRecipe(window._rcRandId)">פתח מתכון</button>`;
+  const run=++_randRun;
   let n=0;const spins=pool.length>1?9:1;
   body.classList.add('rc-spin');
   const show=r=>{window._rcRandId=r.id;body.innerHTML=`<div class="rc-rand"><div class="rc-rand-card"><div class="rc-rand-img" style="${r.photo?'':grad(r)}">${r.photo?`<img src="${r.photo}" alt="">`:E(r.emoji||catOf(catsOf(r)[0]).ico)}</div>
     <div class="rc-rand-ttl">${E(r.title)}</div><div class="rc-rand-sub">${[r.origin&&('👵 '+E(r.origin)),totalMin(r)&&('⏱ '+fmtMin(totalMin(r))),E(catLabels(r))].filter(Boolean).join(' · ')}</div></div></div>`;};
   let prev=null;
   const step=()=>{
+    if(run!==_randRun)return;
     let r;do{r=pool[Math.floor(Math.random()*pool.length)];}while(pool.length>1&&r===prev);
     prev=r;show(r);
     if(++n<spins)setTimeout(step,60+n*22);else body.classList.remove('rc-spin');

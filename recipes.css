@@ -290,3 +290,6 @@ li.done .rc-ing-tx{text-decoration:line-through;opacity:.45}
 .rc-imp-item input{width:100%;box-sizing:border-box;border:1.5px solid transparent;border-radius:8px;padding:4px 6px;font-size:14px;font-weight:700;font-family:inherit;background:none;color:inherit}
 .rc-imp-item input:focus{border-color:#F59E0B;outline:none}
 .rc-imp-item small{display:block;font-size:11px;opacity:.75;padding:0 6px}
+.rc-rand-q{font-size:15px;font-weight:800;margin-bottom:12px}
+.rc-rand-cats button small{font-size:11px;opacity:.6;margin-right:2px}
+.rc-rand-hint{font-size:12px;color:var(--rc-ink2);margin-top:12px}
