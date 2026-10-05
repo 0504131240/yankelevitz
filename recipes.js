@@ -952,9 +952,76 @@ window.rcTimerAdd=function(id){const t=S.timers.find(x=>x.id===id);if(t)t.end+=6
 window.rcTimerStop=function(id){S.timers=S.timers.filter(x=>x.id!==id);tickTimers();};
 
 // ── shopping list ──────────────────────────────────────────────────────────
+// The list keeps every recipe's ingredients as added (so each line can say
+// where it came from); what's shown merges them: same ingredient in the same
+// unit is summed — 4 כפות סוכר + 2 כפות סוכר = 6 כפות סוכר. Grams/kilos and
+// ml/liters are combined too; cups and spoons stay apart.
+const UNITS=[
+  {k:'cup',one:'כוס',many:'כוסות',w:['כוס','כוסות','כוסות']},
+  {k:'tbsp',one:'כף',many:'כפות',w:['כף','כפות']},
+  {k:'tsp',one:'כפית',many:'כפיות',w:['כפית','כפיות']},
+  {k:'g',one:'גרם',many:'גרם',w:['גרם','גר\'','גר׳','גר','ג\'','ג׳','ג']},
+  {k:'g',f:1000,w:['קילו','ק"ג','ק״ג','קג','קילוגרם']},
+  {k:'ml',one:'מ״ל',many:'מ״ל',w:['מ"ל','מ״ל','מל','מיליליטר']},
+  {k:'ml',f:1000,w:['ליטר','ליטרים']},
+  {k:'pkt',one:'חבילה',many:'חבילות',w:['חבילה','חבילות','חבילת']},
+  {k:'bag',one:'שקית',many:'שקיות',w:['שקית','שקיות']},
+  {k:'jar',one:'צנצנת',many:'צנצנות',w:['צנצנת','צנצנות']},
+  {k:'can',one:'קופסה',many:'קופסאות',w:['קופסה','קופסא','קופסאות','קופסת','פחית','פחיות']},
+  {k:'clove',one:'שן',many:'שיני',w:['שן','שיני','שיניים']},
+  {k:'slice',one:'פרוסה',many:'פרוסות',w:['פרוסה','פרוסות']},
+  {k:'bunch',one:'צרור',many:'צרורות',w:['צרור','צרורות']},
+  {k:'unit',one:'יחידה',many:'יחידות',w:['יחידה','יחידות']}
+];
+// counted items written in the singular ("ביצה אחת") merge with the plural
+const SHOP_PLURAL={'ביצה':'ביצים','בצל':'בצלים','עגבניה':'עגבניות','עגבנייה':'עגבניות','תפוח אדמה':'תפוחי אדמה','גזר':'גזרים','לימון':'לימונים','מלפפון':'מלפפונים','תפוח':'תפוחים','בננה':'בננות','פלפל':'פלפלים','חלמון':'חלמונים','חלבון':'חלבונים'};
+function parseShopItem(text){
+  let t=String(text||'').trim(),qty=null;
+  const s1=scaleLine(t,1);
+  if(s1.q){
+    const q=String(s1.q).split(/[-–]/).pop().trim();
+    qty=NUM_WORDS[q]!=null?NUM_WORDS[q]:parseNum(q);
+    if(!isFinite(qty))qty=null;
+    t=s1.rest.trim();
+  }
+  // "ביצה אחת", "שן שום אחת": the count written after the name
+  if(qty==null&&/\s(אחת|אחד)$/.test(t)){qty=1;t=t.replace(/\s(אחת|אחד)$/,'');}
+  let unit=null,f=1;
+  for(const u of UNITS){
+    const w=u.w.find(w=>t===w||t.startsWith(w+' '));
+    // a unit with no number before it means one: "קילו קמח", "כוס סוכר"
+    if(w&&t!==w){unit=u.k;f=u.f||1;t=t.slice(w.length).trim();if(qty==null)qty=1;break;}
+  }
+  let name=t.replace(/^של\s+/,'').replace(/[.,;]+$/,'').replace(/\s+/g,' ').trim();
+  if(!unit&&SHOP_PLURAL[name])name=SHOP_PLURAL[name];
+  return {qty:qty!=null?qty*f:null,unit,name:name||String(text||'').trim()};
+}
+function unitLabel(k,n){
+  if(k==='g')return n>=1000?['קילו',n/1000]:['גרם',n];
+  if(k==='ml')return n>=1000?['ליטר',n/1000]:['מ״ל',n];
+  const u=UNITS.find(u=>u.k===k&&u.one);
+  return [u?(n>1?u.many:u.one):'',n];
+}
+function shopMerged(){
+  const map=new Map();
+  shop().forEach(x=>{
+    const p=parseShopItem(x.text);
+    const key=(p.qty!=null?(p.unit||'#'):'-')+'|'+p.name.toLowerCase();
+    if(!map.has(key))map.set(key,{key,name:p.name,unit:p.unit,qty:p.qty!=null?0:null,ids:[],from:new Set(),done:true});
+    const m=map.get(key);
+    if(p.qty!=null)m.qty+=p.qty;
+    m.ids.push(x.id);if(x.from)m.from.add(x.from);
+    if(!x.done)m.done=false;
+  });
+  return [...map.values()].map(m=>{
+    let text=m.name;
+    if(m.qty!=null){const [u,n]=m.unit?unitLabel(m.unit,m.qty):['',m.qty];text=fmtNum(n)+' '+(u?u+' ':'')+m.name;}
+    return {...m,text,from:[...m.from]};
+  });
+}
 function updateShopBadge(){
   const b=$('rcShopBadge');if(!b)return;
-  const n=shop().filter(x=>!x.done).length;
+  const n=shopMerged().filter(x=>!x.done).length;
   b.textContent=n;b.style.display=n?'flex':'none';
 }
 window.rcAddToShop=function(){
@@ -972,19 +1039,23 @@ window.rcAddToShop=function(){
 window.rcOpenShop=function(){renderShop();$('rcShopModal').classList.add('open');};
 window.rcCloseModal=function(id){$(id).classList.remove('open');};
 function renderShop(){
-  const list=shop(),groups=new Map();
-  list.forEach(x=>{const g=x.from||'פריטים נוספים';if(!groups.has(g))groups.set(g,[]);groups.get(g).push(x);});
+  const items=shopMerged(),recipes=[...new Set(shop().map(x=>x.from).filter(Boolean))];
+  // not-yet-bought first; the rest sink to the bottom, crossed out
+  items.sort((a,b)=>a.done-b.done);
   $('rcShopBody').innerHTML=`<div class="rc-shop-add"><input id="rcShopInp" placeholder="הוספת פריט..." onkeydown="if(event.key==='Enter')rcShopAdd()"><button onclick="rcShopAdd()">+</button></div>`+
-    (list.length?[...groups.entries()].map(([g,items])=>`<div class="rc-shop-grp"><b>${E(g)}</b><ul class="rc-ing">${items.map(x=>`<li class="${x.done?'done':''}" onclick="rcShopToggle('${x.id}')"><span class="rc-ck">✓</span><span class="rc-ing-tx">${E(x.text)}</span><button class="rc-shop-x" onclick="event.stopPropagation();rcShopDel('${x.id}')">✕</button></li>`).join('')}</ul></div>`).join('')
+    (items.length?(recipes.length?`<div class="rc-shop-from">🍲 ${recipes.map(E).join(' · ')}</div>`:'')
+      +`<ul class="rc-ing">${items.map(x=>`<li class="${x.done?'done':''}" data-k="${E(x.key)}" onclick="rcShopToggle(this.dataset.k)"><span class="rc-ck">✓</span><span class="rc-ing-tx">${E(x.text)}${x.from.length>1||(x.from.length&&recipes.length>1)?`<small class="rc-shop-src">${x.from.map(E).join(' · ')}</small>`:''}</span><button class="rc-shop-x" onclick="event.stopPropagation();rcShopDel(this.parentNode.dataset.k)">✕</button></li>`).join('')}</ul>`
       +`<button onclick="if(confirm('לרוקן את כל הרשימה?'))rcShopClear(false)" style="border:none;background:none;color:var(--rc-meat);font-size:12px;font-weight:700;padding:4px 0">🗑 ריקון הרשימה</button>`
     :'<div class="rc-empty" style="padding:30px 10px"><span class="rc-empty-ico" style="font-size:48px">🛒</span>הרשימה ריקה.<br>בדף של מתכון לחצו "לקניות" כדי להוסיף את המצרכים שלו.</div>');
 }
-window.rcShopAdd=function(){const i=$('rcShopInp'),t=(i.value||'').trim();if(!t)return;const l=shop();l.push({id:Date.now().toString(36),text:t,from:'',done:false});setShop(l);renderShop();$('rcShopInp').focus();};
-window.rcShopToggle=function(id){const l=shop(),x=l.find(y=>y.id===id);if(x)x.done=!x.done;setShop(l);renderShop();};
-window.rcShopDel=function(id){setShop(shop().filter(x=>x.id!==id));renderShop();};
+window.rcShopAdd=function(){const i=$('rcShopInp'),t=(i.value||'').trim();if(!t)return;const l=shop();l.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),text:t,from:'',done:false});setShop(l);renderShop();$('rcShopInp').focus();};
+// toggling / deleting a merged line acts on every entry behind it
+function idsOf(key){const m=shopMerged().find(x=>x.key===key);return m?new Set(m.ids):new Set();}
+window.rcShopToggle=function(key){const m=shopMerged().find(x=>x.key===key);if(!m)return;const ids=new Set(m.ids),l=shop();l.forEach(x=>{if(ids.has(x.id))x.done=!m.done;});setShop(l);renderShop();};
+window.rcShopDel=function(key){const ids=idsOf(key);setShop(shop().filter(x=>!ids.has(x.id)));renderShop();};
 window.rcShopClear=function(onlyDone){setShop(onlyDone?shop().filter(x=>!x.done):[]);renderShop();};
 window.rcShopShare=async function(){
-  const items=shop().filter(x=>!x.done);if(!items.length){toast('אין פריטים לשליחה');return;}
+  const items=shopMerged().filter(x=>!x.done);if(!items.length){toast('אין פריטים לשליחה');return;}
   const text='🛒 *רשימת קניות*\n'+items.map(x=>'▫️ '+x.text).join('\n');
   if(navigator.share){try{await navigator.share({text});return;}catch(e){if(e.name==='AbortError')return;}}
   window.open('https://wa.me/?text='+encodeURIComponent(text),'_blank');

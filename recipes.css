@@ -266,3 +266,5 @@ li.done .rc-ing-tx{text-decoration:line-through;opacity:.45}
 .rc-hint{font-weight:600;opacity:.75}
 .rc-step-sec{font-weight:800;color:var(--rc-accent2);font-size:14px;padding:12px 2px 2px}
 .rc-step-sec:first-child{padding-top:0}
+.rc-shop-from{font-size:12px;font-weight:700;color:var(--rc-accent2);background:var(--rc-accent-bg);border-radius:12px;padding:7px 11px;margin-bottom:10px;line-height:1.5}
+.rc-shop-src{display:block;font-size:11px;color:var(--rc-ink2);font-weight:500;margin-top:1px}
