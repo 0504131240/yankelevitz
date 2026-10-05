@@ -36,6 +36,8 @@ let yahrzeits=[];
 let familyTree=[];
 // Family-tree filling competition: {email:{name,points}} — see _awardTreePoints().
 let treeScores={};
+// Who was at the parents' for each Shabbat: {'YYYY-MM-DD' (the Saturday): {fams:[famId], note}}
+let shabbatVisits={};
 let nxtMsg=1,nxtCal=1,nxtBday=1,nxtClaim=1,nxtNotif=1,nxtPoll=1,nxtCountdown=1,nxtYahrzeit=1,nxtTreePerson=1;
 let currentShell='home';
 let calYear=new Date().getFullYear(),calMonth=new Date().getMonth(),calSelDay=null,calHebrew=true;
@@ -297,7 +299,7 @@ function closeSettingsHubModal(){
 // notifications' 200-entry cap) only ever grows, so this is worth being
 // able to check at a glance instead of guessing why saves keep failing.
 function _dataSizeBytes(){
-  const payload={families,events,fund,goalFunds,savingsPot,adminPass,messages,calItems,birthdays,paymentClaims,globalSettled,visits,notifications,polls,countdowns,yahrzeits,familyTree,treeScores};
+  const payload={families,events,fund,goalFunds,savingsPot,adminPass,messages,calItems,birthdays,paymentClaims,globalSettled,visits,notifications,polls,countdowns,yahrzeits,familyTree,treeScores,shabbatVisits};
   return new Blob([JSON.stringify(payload)]).size;
 }
 function renderDataSizeCheck(){
@@ -894,6 +896,7 @@ function saveLocal(){
     localStorage.setItem('yahrzeits',JSON.stringify(yahrzeits));
     localStorage.setItem('familyTree',JSON.stringify(familyTree));
     localStorage.setItem('treeScores',JSON.stringify(treeScores));
+    localStorage.setItem('shabbatVisits',JSON.stringify(shabbatVisits));
   }catch(e){}
 }
 
@@ -938,6 +941,7 @@ function _restoreAllFromLocalCache(){
   const yhz=localStorage.getItem('yahrzeits');if(yhz)yahrzeits=JSON.parse(yhz);
   const ftr=localStorage.getItem('familyTree');if(ftr)familyTree=JSON.parse(ftr);
   const trs=localStorage.getItem('treeScores');if(trs)treeScores=JSON.parse(trs);
+  const shv=localStorage.getItem('shabbatVisits');if(shv)shabbatVisits=JSON.parse(shv);
   nxtMsg=messages.length?Math.max(...messages.map(m=>m.id))+1:1;
   nxtCal=calItems.length?Math.max(...calItems.map(c=>c.id))+1:1;
   nxtBday=birthdays.length?Math.max(...birthdays.map(b=>b.id))+1:1;
@@ -958,7 +962,7 @@ let _retryTimer=null;
 // doesn't blindly re-push a stale in-memory `families` and wipe out a
 // change someone else already saved to it — see save()'s own staleness
 // check for when this actually gets used.
-const _SYNC_FIELDS=['families','events','fund','goalFunds','savingsPot','messages','calItems','birthdays','paymentClaims','globalSettled','visits','notifications','polls','countdowns','yahrzeits','familyTree','treeScores','adminPass'];
+const _SYNC_FIELDS=['families','events','fund','goalFunds','savingsPot','messages','calItems','birthdays','paymentClaims','globalSettled','visits','notifications','polls','countdowns','yahrzeits','familyTree','treeScores','shabbatVisits','adminPass'];
 function _getSyncFieldValue(f){
   switch(f){
     case'families':return families;case'events':return events;case'fund':return fund;
@@ -966,7 +970,7 @@ function _getSyncFieldValue(f){
     case'calItems':return calItems;case'birthdays':return birthdays;case'paymentClaims':return paymentClaims;
     case'globalSettled':return globalSettled;case'visits':return visits;case'notifications':return notifications;
     case'polls':return polls;case'countdowns':return countdowns;case'yahrzeits':return yahrzeits;
-    case'familyTree':return familyTree;case'treeScores':return treeScores;case'adminPass':return adminPass;
+    case'familyTree':return familyTree;case'treeScores':return treeScores;case'shabbatVisits':return shabbatVisits;case'adminPass':return adminPass;
   }
 }
 function _setSyncFieldValue(f,v){
@@ -976,7 +980,7 @@ function _setSyncFieldValue(f,v){
     case'calItems':calItems=v;break;case'birthdays':birthdays=v;break;case'paymentClaims':paymentClaims=v;break;
     case'globalSettled':globalSettled=v;break;case'visits':visits=v;break;case'notifications':notifications=v;break;
     case'polls':polls=v;break;case'countdowns':countdowns=v;break;case'yahrzeits':yahrzeits=v;break;
-    case'familyTree':familyTree=v;break;case'treeScores':treeScores=v;break;case'adminPass':adminPass=v;break;
+    case'familyTree':familyTree=v;break;case'treeScores':treeScores=v;break;case'shabbatVisits':shabbatVisits=v;break;case'adminPass':adminPass=v;break;
   }
 }
 // A snapshot of every synced field exactly as it stood the last time this
@@ -1032,7 +1036,7 @@ async function save(){
         }
       }catch(e){console.warn('pre-save freshness check failed, saving local state as-is:',e);}
     }
-    await setDoc(doc(db,'appData','familyPayments'),{families,events,fund,goalFunds,savingsPot,adminPass,messages,calItems,birthdays,paymentClaims,globalSettled,visits,notifications,polls,countdowns,yahrzeits,familyTree,treeScores});
+    await setDoc(doc(db,'appData','familyPayments'),{families,events,fund,goalFunds,savingsPot,adminPass,messages,calItems,birthdays,paymentClaims,globalSettled,visits,notifications,polls,countdowns,yahrzeits,familyTree,treeScores,shabbatVisits});
     _captureSyncBaseline();
     localStorage.removeItem('pendingSave');
     localStorage.removeItem('pendingSaveAt');
@@ -1083,6 +1087,7 @@ async function load(){
     yahrzeits=d.yahrzeits||[];
     familyTree=d.familyTree||[];
     treeScores=d.treeScores||{};
+    shabbatVisits=d.shabbatVisits||{};
     nxtMsg=messages.length?Math.max(...messages.map(m=>m.id))+1:1;
     nxtCal=calItems.length?Math.max(...calItems.map(c=>c.id))+1:1;
     nxtBday=birthdays.length?Math.max(...birthdays.map(b=>b.id))+1:1;
@@ -1201,7 +1206,7 @@ function showSyncStatus(msg,hideAfter){
 
 function render(){
   applyEditMode();
-  const fns=[renderHome,renderMetrics,renderOpenList,renderArchive,renderFamilies,renderFund,renderGoalFunds,renderFamilyHome,renderClaimsBanner,renderVisitLog,renderNotifCenterBadge,renderPollBanner,renderFamilyTreeIfOpen,renderArchiveEvDetailIfOpen];
+  const fns=[renderHome,renderMetrics,renderOpenList,renderArchive,renderFamilies,renderFund,renderGoalFunds,renderFamilyHome,renderClaimsBanner,renderVisitLog,renderNotifCenterBadge,renderPollBanner,renderFamilyTreeIfOpen,renderArchiveEvDetailIfOpen,renderShabbatPill,renderShabbatIfOpen];
   fns.forEach(fn=>{try{fn();}catch(e){console.error(fn.name,e);}});
   const debt=calcDebt();
   const open=events.filter(e=>e.open).length;
@@ -3758,6 +3763,7 @@ async function startRealtimeSync(){
         changed=_adoptIfChanged(d.familyTree||[],()=>familyTree,v=>familyTree=v,
           ()=>{nxtTreePerson=familyTree.length?Math.max(...familyTree.map(p=>p.id))+1:1;})||changed;
         changed=_adoptIfChanged(d.treeScores||{},()=>treeScores,v=>treeScores=v)||changed;
+        changed=_adoptIfChanged(d.shabbatVisits||{},()=>shabbatVisits,v=>shabbatVisits=v)||changed;
         if((d.adminPass||'')!==adminPass){adminPass=d.adminPass||'';}
         // Whatever we just adopted (or already matched) now matches
         // Firestore as far as this device knows — refresh the baseline
@@ -6369,6 +6375,117 @@ function deletePerson(){
     f.children=f.kids.length;
   }
   save();renderFamPeopleGrid();render();closePersonModal();
+}
+
+// ── Shabbat at the parents' ────────────────────────────────────────────────
+// A log of which families came for each Shabbat, kept in shabbatVisits keyed
+// by the Saturday's date. Anyone may mark anyone. The hosts are the family
+// named "אבא ואמא" and never appear as visitors.
+function _shbHost(){return families.find(f=>/אבא ואמא/.test(f.name||''))||null;}
+function _shbHostName(){const h=_shbHost();return h?h.name.replace('משפחת','').trim():'ההורים';}
+function _shbKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function _shbDate(key){const [y,m,d]=key.split('-').map(Number);return new Date(y,m-1,d);}
+// This week's Saturday (today, if it is Saturday).
+function _shbThis(){const d=new Date();d.setHours(12,0,0,0);d.setDate(d.getDate()+((6-d.getDay()+7)%7));return d;}
+function _shbAdd(d,weeks){const x=new Date(d);x.setDate(x.getDate()+7*weeks);return x;}
+function _shbHeb(d){try{return new Intl.DateTimeFormat('he-IL-u-ca-hebrew',{day:'numeric',month:'long'}).format(d);}catch(e){return '';}}
+function _shbLat(d){return d.getDate()+'.'+(d.getMonth()+1);}
+function _shbVisitors(){const h=_shbHost();return families.filter(f=>!h||f.id!==h.id);}
+function _shbShort(f){return f.name.replace('משפחת','').trim();}
+function _shbFams(key){return ((shabbatVisits[key]||{}).fams||[]).map(getFam).filter(Boolean);}
+function renderShabbatPill(){
+  const sub=document.getElementById('shabbatPillSub');if(!sub)return;
+  const lbl=document.getElementById('shabbatPillLbl');if(lbl)lbl.textContent='שבתות אצל '+_shbHostName();
+  const fams=_shbFams(_shbKey(_shbThis()));
+  sub.textContent=fams.length?'השבת: '+fams.map(_shbShort).join(', '):'השבת: עוד לא נרשם מי מגיע';
+}
+let _shbOpen=false,_shbShowPast=8,_shbTab='list';
+function _shbEnsureModal(){
+  let m=document.getElementById('shabbatModal');if(m)return m;
+  m=document.createElement('div');m.id='shabbatModal';
+  m.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2500;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
+  m.onclick=e=>{if(e.target===m)closeShabbatModal();};
+  m.innerHTML=`<div style="background:var(--bg);border-radius:var(--r2);max-width:440px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:8px">
+      <span id="shabbatModalTtl" style="font-size:15px;font-weight:800;color:var(--text)"></span>
+      <button onclick="closeShabbatModal()" aria-label="סגירה" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text2);line-height:1;padding:0">✕</button>
+    </div>
+    <div id="shabbatTabs" style="display:flex;gap:6px;padding:10px 16px 0;flex-shrink:0"></div>
+    <div id="shabbatModalBody" style="flex:1;overflow-y:auto;padding:12px 16px 16px"></div>
+  </div>`;
+  document.body.appendChild(m);return m;
+}
+function openShabbatModal(){_shbOpen=true;_shbShowPast=8;_shbTab='list';_shbEnsureModal().style.display='flex';renderShabbatIfOpen();}
+function closeShabbatModal(){_shbOpen=false;const m=document.getElementById('shabbatModal');if(m)m.style.display='none';}
+function setShabbatTab(t){_shbTab=t;renderShabbatIfOpen();}
+function shabbatMorePast(){_shbShowPast+=12;renderShabbatIfOpen();}
+function toggleShabbatFam(key,fid){
+  const e=shabbatVisits[key]||{fams:[]};
+  const has=(e.fams||[]).includes(fid);
+  e.fams=has?e.fams.filter(x=>x!==fid):(e.fams||[]).concat(fid);
+  if(!e.fams.length&&!e.note)delete shabbatVisits[key];else shabbatVisits[key]=e;
+  save();renderShabbatPill();renderShabbatIfOpen();
+}
+function editShabbatNote(key){
+  const cur=(shabbatVisits[key]||{}).note||'';
+  const v=prompt('הערה לשבת הזו (למשל: מי מביא מה, אורחים)',cur);
+  if(v===null)return;
+  const e=shabbatVisits[key]||{fams:[]};e.note=v.trim().slice(0,200);
+  if(!(e.fams||[]).length&&!e.note)delete shabbatVisits[key];else shabbatVisits[key]=e;
+  save();renderShabbatIfOpen();
+}
+function _shbRow(d,label){
+  const key=_shbKey(d),e=shabbatVisits[key]||{},on=new Set(e.fams||[]);
+  const chips=_shbVisitors().map(f=>{const sel=on.has(f.id);
+    return`<button type="button" onclick="toggleShabbatFam('${key}',${f.id})" aria-pressed="${sel}" style="padding:5px 11px;border-radius:16px;border:1.5px solid ${sel?'var(--blue-mid)':'var(--border)'};background:${sel?'var(--blue-mid)':'transparent'};color:${sel?'#fff':'var(--text2)'};font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">${sel?'✓ ':''}${esc(_shbShort(f))}</button>`;}).join('');
+  return`<div style="border:1.5px solid ${label?'var(--blue-mid)':'var(--border)'};border-radius:var(--r2);padding:10px 12px;margin-bottom:8px;background:var(--surface)">
+    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
+      <span style="font-size:14px;font-weight:800;color:var(--text)">שבת ${esc(_shbHeb(d))}</span>
+      <span style="font-size:11px;color:var(--text3)">${_shbLat(d)}</span>
+      ${label?`<span style="font-size:11px;font-weight:700;color:var(--blue-mid)">${label}</span>`:''}
+      <span style="flex:1"></span>
+      <span style="font-size:11px;font-weight:700;color:var(--text2)">${on.size?on.size+' משפחות':''}</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
+    <button type="button" onclick="editShabbatNote('${key}')" style="margin-top:8px;padding:0;border:none;background:none;font-size:12px;font-family:var(--font);cursor:pointer;color:${e.note?'var(--text)':'var(--text3)'};text-align:right">📝 ${e.note?esc(e.note):'הוספת הערה'}</button>
+  </div>`;
+}
+function _shbSummary(){
+  // Counts over the last 12 months, newest visit first in each family's line.
+  const since=_shbAdd(_shbThis(),-52),now=_shbThis();
+  const rows=_shbVisitors().map(f=>{
+    const keys=Object.keys(shabbatVisits).filter(k=>(shabbatVisits[k].fams||[]).includes(f.id)).filter(k=>{const d=_shbDate(k);return d>=since&&d<=now;}).sort();
+    return {f,n:keys.length,last:keys.length?_shbDate(keys[keys.length-1]):null};
+  }).sort((a,b)=>b.n-a.n||(b.last||0)-(a.last||0));
+  const max=Math.max(1,...rows.map(r=>r.n));
+  const ago=d=>{if(!d)return'עוד לא נרשם';const w=Math.round((now-d)/(7*864e5));return w===0?'השבת':w===1?'לפני שבוע':'לפני '+w+' שבועות';};
+  return`<div style="font-size:12px;color:var(--text2);margin-bottom:10px">כמה שבתות כל משפחה הייתה אצל ${esc(_shbHostName())} ב-12 החודשים האחרונים</div>
+    ${rows.map(r=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+      ${famAva(r.f,30)}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:var(--text)"><span>${esc(_shbShort(r.f))}</span><span style="font-variant-numeric:tabular-nums">${r.n}</span></div>
+        <div style="height:6px;border-radius:3px;background:var(--surface2);margin:4px 0 3px;overflow:hidden"><div style="height:100%;width:${Math.round(r.n/max*100)}%;background:var(--blue-mid);border-radius:3px"></div></div>
+        <div style="font-size:11px;color:var(--text3)">אחרונה: ${ago(r.last)}</div>
+      </div></div>`).join('')}`;
+}
+function renderShabbatIfOpen(){
+  if(!_shbOpen)return;
+  const ttl=document.getElementById('shabbatModalTtl'),tabs=document.getElementById('shabbatTabs'),body=document.getElementById('shabbatModalBody');
+  if(!body)return;
+  ttl.textContent='🕯️ שבתות אצל '+_shbHostName();
+  const tb=(id,l)=>`<button type="button" onclick="setShabbatTab('${id}')" style="flex:1;padding:8px;border-radius:var(--r2);border:1.5px solid ${_shbTab===id?'var(--blue-mid)':'var(--border)'};background:${_shbTab===id?'var(--blue-bg)':'transparent'};color:${_shbTab===id?'var(--blue-mid)':'var(--text2)'};font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer">${l}</button>`;
+  tabs.innerHTML=tb('list','📅 שבתות')+tb('sum','📊 סיכום');
+  const st=body.scrollTop;
+  if(_shbTab==='sum'){body.innerHTML=_shbSummary();return;}
+  const cur=_shbThis();
+  const ahead=[1,2,3,4,5].map(i=>_shbRow(_shbAdd(cur,i),i===1?'שבת הבאה':''));
+  const past=[];for(let i=1;i<=_shbShowPast;i++)past.push(_shbRow(_shbAdd(cur,-i),i===1?'שבת שעברה':''));
+  body.innerHTML=`<div style="font-size:12px;color:var(--text2);margin-bottom:10px">לוחצים על משפחה כדי לסמן שהיא הייתה (או מגיעה). כל אחד יכול לרשום את כולם.</div>
+    ${_shbRow(cur,'השבת')}
+    <div style="font-size:12px;font-weight:700;color:var(--text2);margin:14px 0 8px">שבתות קדימה</div>${ahead.join('')}
+    <div style="font-size:12px;font-weight:700;color:var(--text2);margin:14px 0 8px">שבתות קודמות</div>${past.join('')}
+    <button type="button" onclick="shabbatMorePast()" style="width:100%;padding:9px;border-radius:var(--r2);border:1.5px dashed var(--border);background:transparent;color:var(--text2);font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer">עוד שבתות קודמות</button>`;
+  body.scrollTop=st;
 }
 
 // ── Yahrzeits (memorial dates on the family calendar) ──────────────────────
