@@ -3423,7 +3423,7 @@ function enablePushForEmailSlot(){
   showToast('✓ הפושים הופעלו',1500);
 }
 function _npEmailPane(f,slot){
-  if(!f||!slot)return`<div class="np-empty">התראות במייל זמינות אחרי כניסה עם המייל של המשפחה.</div>`;
+  if(!f||!slot)return`<div class="np-empty">התראות במייל זמינות אחרי כניסה עם המייל או שם המשתמש.</div>`;
   const myEmail=slot===2?f.email2:f.email;
   if(!myEmail)return`<div class="np-empty">אין כתובת מייל רשומה. אפשר להוסיף אותה בעריכת המשפחה.</div>`;
   const pref=f.notifEmailPref?.[slot];
@@ -3433,7 +3433,7 @@ function _npEmailPane(f,slot){
       +`<div class="np-foot">ההגדרה חלה רק על הכתובת שלכם, לא על שאר בני המשפחה.</div>`:'');
 }
 function _npPhonePane(f,phones){
-  if(!f)return`<div class="np-empty">שיחות לפלאפון זמינות אחרי כניסה עם המייל של המשפחה.</div>`;
+  if(!f)return`<div class="np-empty">שיחות לפלאפון זמינות אחרי כניסה עם המייל או שם המשתמש.</div>`;
   if(!phones.length)return`<div class="np-empty">שיחה מוקראת לפלאפון כשר, למי שאין אינטרנט.<br>עדיין לא הוזן מספר. מוסיפים אותו בעריכת המשפחה: לוחצים על ההורה וממלאים "טלפון כשר".</div>`;
   return phones.map(({slot,p})=>{
     const name=(slot===2?f.emailName2:f.emailName)||(slot===2?'הורה 2':'הורה 1');
@@ -6276,6 +6276,7 @@ function openPersonModal(mode,kidId){
     else{_kidPickedDate=null;_kidLegacyDate=null;}
     deleteBtn.style.display=(email||nameInp.value||bday)?'block':'none';
     _renderPersonPhoneSection(f,isP1?1:2);
+    _renderPersonUsernameSection(f,isP1?1:2);
   }else{
     emailWrap.style.display='none';
     genderWrap.style.display='flex';
@@ -6288,7 +6289,7 @@ function openPersonModal(mode,kidId){
     title.textContent=k?'✏️ ערוך ילד':'👶 הוסף ילד';
     deleteBtn.style.display=k?'block':'none';
   }
-  if(mode!=='p1'&&mode!=='p2')_renderPersonPhoneSection(f,null);
+  if(mode!=='p1'&&mode!=='p2'){_renderPersonPhoneSection(f,null);_renderPersonUsernameSection(f,null);}
   updateKidDateBtn();
   document.getElementById('personModal').style.display='flex';
   setTimeout(()=>{if(nameInp)nameInp.focus();},50);
@@ -6306,6 +6307,13 @@ function savePerson(){
     const phoneRaw=(document.getElementById('personKosherPhone')?.value||'').trim();
     const phone=phoneRaw?_normPhone(phoneRaw):null;
     if(phoneRaw&&!phone){alert('מספר הטלפון הכשר לא תקין');return;}
+    const username=_cleanUsername(document.getElementById('personUsername')?.value||'');
+    if(username){
+      if(username.includes('@')||!_validUsername(username)){alert('שם המשתמש צריך להיות 3–20 אותיות או ספרות, בלי רווחים ובלי @');return;}
+      const taken=_findByUsername(username);
+      if(taken&&!(taken.fam.id===f.id&&taken.slot===(isP1?1:2))){alert('שם המשתמש "'+username+'" כבר תפוס — בחרו שם אחר');return;}
+    }
+    if(isP1){if(username)f.username=username;else delete f.username;}else{if(username)f.username2=username;else delete f.username2;}
     // Keep the call choices (set in the 🔔 window); a new number starts on the defaults.
     const prevPhone=_parentPhone(f,isP1?1:2);
     _setParentPhone(f,isP1?1:2,phone?{...(prevPhone||{}),phone,cats:prevPhone?.cats||Object.fromEntries(PHONE_CATS.map(c=>[c.id,!!c.def]))}:null);
@@ -6350,7 +6358,7 @@ function deletePerson(){
     // Email is admin-managed (see personEmailWrap's edit-only gate) — a family
     // member deleting their own name/birthday here must not silently wipe out
     // the notification email the admin set up for them.
-    if(isP1){if(editMode)f.email='';f.emailName='';delete f.parent1Bday;}else{if(editMode)f.email2='';f.emailName2='';delete f.parent2Bday;}
+    if(isP1){if(editMode)f.email='';f.emailName='';delete f.parent1Bday;delete f.username;}else{if(editMode)f.email2='';f.emailName2='';delete f.parent2Bday;delete f.username2;}
     if(editMode)_setParentPhone(f,isP1?1:2,null);
   }else{
     if(_personKidId==null)return;
@@ -7386,8 +7394,8 @@ function openEmailGateModal(){
     <div style="padding:26px 22px;text-align:center">
       <div style="font-size:34px;margin-bottom:8px">👋</div>
       <div style="font-size:15px;font-weight:700;margin-bottom:6px">ברוכים הבאים</div>
-      <div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:18px">האפליקציה מיועדת למשפחות המשתתפות בלבד — הזינו את כתובת המייל שלכם כדי להיכנס</div>
-      <input id="emailGateInput" type="email" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="you@example.com" style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:11px 12px;font-size:14px;font-family:var(--font);background:var(--bg);color:var(--text);direction:ltr;text-align:center;box-sizing:border-box;margin-bottom:6px" onkeydown="if(event.key==='Enter')submitEmailGate()">
+      <div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:18px">האפליקציה מיועדת למשפחות המשתתפות בלבד — הזינו את כתובת המייל או את שם המשתמש שלכם כדי להיכנס</div>
+      <input id="emailGateInput" type="text" aria-label="מייל או שם משתמש" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="מייל או שם משתמש" style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:11px 12px;font-size:14px;font-family:var(--font);background:var(--bg);color:var(--text);text-align:center;box-sizing:border-box;margin-bottom:6px" onkeydown="if(event.key==='Enter')submitEmailGate()">
       <div id="emailGateError" style="font-size:12px;color:var(--red-mid);min-height:16px;margin-bottom:8px"></div>
       <button onclick="submitEmailGate()" style="width:100%;padding:12px;border-radius:var(--r2);border:none;background:var(--blue-mid);color:#fff;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer">המשך</button>
     </div>`;
@@ -7413,8 +7421,20 @@ function maybePromptFamilyUpdate(){
   showToast('📋 רגע — כדאי לוודא ששמות וימי הולדת מעודכנים, ולשמור',5000);
 }
 function submitEmailGate(){
-  const email=_cleanEmail(document.getElementById('emailGateInput')?.value||'');
+  const raw=document.getElementById('emailGateInput')?.value||'';
   const errEl=document.getElementById('emailGateError');
+  // No "@" means a username (set per parent in the family-edit person window).
+  if(!raw.includes('@')){
+    const u=_cleanUsername(raw);
+    if(!u){ if(errEl)errEl.textContent='הזינו מייל או שם משתמש'; return; }
+    const hit=_findByUsername(u);
+    if(!hit){ if(errEl)errEl.textContent='לא נמצא שם המשתמש הזה'; return; }
+    localStorage.setItem('deviceFamId3',String(hit.fam.id));
+    localStorage.setItem('deviceEmailSlot3',String(hit.slot));
+    showEmailGateWelcome(hit.fam,hit.slot);
+    return;
+  }
+  const email=_cleanEmail(raw);
   if(!_validEmail(email)){ if(errEl)errEl.textContent='כתובת מייל לא תקינה'; return; }
   const fam=families.find(f=>_cleanEmail(f.email)===email||_cleanEmail(f.email2)===email);
   if(!fam){ if(errEl)errEl.textContent='לא נמצאה משפחה עם המייל הזה'; return; }
@@ -7422,6 +7442,30 @@ function submitEmailGate(){
   localStorage.setItem('deviceFamId3',String(fam.id));
   localStorage.setItem('deviceEmailSlot3',String(slot));
   showEmailGateWelcome(fam,slot);
+}
+// Usernames: an alternative to the email for getting in. One per parent
+// (f.username / f.username2), unique across all families, compared
+// case-insensitively.
+function _cleanUsername(v){return String(v||'').trim().toLowerCase().replace(/\s+/g,'');}
+function _validUsername(u){return /^[a-z0-9\u0590-\u05ff._-]{3,20}$/.test(u);}
+function _findByUsername(u){
+  for(const f of families){
+    if(f.username&&_cleanUsername(f.username)===u)return{fam:f,slot:1};
+    if(f.username2&&_cleanUsername(f.username2)===u)return{fam:f,slot:2};
+  }
+  return null;
+}
+function _renderPersonUsernameSection(f,slot){
+  const anchor=document.getElementById('personEmailWrap');if(!anchor)return;
+  let el=document.getElementById('personUsernameSection');
+  if(!el){el=document.createElement('div');el.id='personUsernameSection';el.style.marginBottom='14px';anchor.before(el);}
+  if(slot==null){el.style.display='none';el.innerHTML='';return;}
+  const cur=slot===1?f.username:f.username2;
+  el.style.display='block';
+  el.innerHTML=`<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">🔑 שם משתמש לכניסה (אופציונלי)</div>
+    <input type="text" id="personUsername" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="למשל moshe" value="${esc(cur||'')}"
+      style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 12px;font-size:14px;font-family:var(--font);background:var(--bg);color:var(--text);box-sizing:border-box;direction:ltr;text-align:right">
+    <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.5">אפשר להיכנס לאתר עם שם המשתמש במקום המייל. 3–20 אותיות או ספרות, בלי רווחים.</div>`;
 }
 function resetDeviceIdentity(){
   localStorage.removeItem('deviceFamId3');
