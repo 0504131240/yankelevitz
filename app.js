@@ -9949,13 +9949,21 @@ function renderPotTransferModal(ev){
         </div>
       </div>`;
     }
-    return`<div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border)">
-      <div style="flex:1;min-width:0">
+    // The amount is editable: the suggestion splits the pot among everyone
+    // owed, but the admin may give one family more now — up to what's in the
+    // pot or what they're owed, whichever is lower (releasePotManual caps it).
+    const maxAmt=Math.max(0,Math.min(owed,potAvail));
+    const inpId='pot-amt-'+ev.id+'-'+fid;
+    return`<div style="padding:10px 16px;border-bottom:1px solid var(--border)">
+      <div style="margin-bottom:6px">
         <div style="font-size:13px;font-weight:700">${esc(name)}</div>
-        <div style="font-size:11px;color:var(--text2)">מגיע לו ₪${sug.toLocaleString()}</div>
+        <div style="font-size:11px;color:var(--text2)">מגיע לו ₪${owed.toLocaleString()}${sug<owed?` · מוצע מהקופה ₪${sug.toLocaleString()}`:''} · אפשר עד ₪${maxAmt.toLocaleString()}</div>
       </div>
-      <button onclick="releasePotToOneM(${ev.id},${fid},false)" style="padding:7px 12px;border-radius:8px;border:none;background:var(--blue-mid);color:#fff;font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer;white-space:nowrap">↗ העבר</button>
-      <button onclick="releasePotToOneM(${ev.id},${fid},true)" style="padding:7px 12px;border-radius:8px;border:none;background:var(--green-mid);color:#fff;font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer;white-space:nowrap">🏦 ארנק</button>
+      <div style="display:flex;gap:6px">
+        <input id="${inpId}" type="number" min="1" max="${maxAmt}" value="${sug}" inputmode="numeric" aria-label="סכום להעברה" style="width:80px;flex-shrink:0;border:1.5px solid var(--border);border-radius:8px;padding:6px 8px;font-size:13px;font-family:var(--font);background:var(--bg);color:var(--text);direction:ltr;text-align:center">
+        <button onclick="releasePotManualM(${ev.id},${fid},'${inpId}',false)" style="flex:1;padding:7px 10px;border-radius:8px;border:none;background:var(--blue-mid);color:#fff;font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer;white-space:nowrap">↗ העבר</button>
+        <button onclick="releasePotManualM(${ev.id},${fid},'${inpId}',true)" style="flex:1;padding:7px 10px;border-radius:8px;border:none;background:var(--green-mid);color:#fff;font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer;white-space:nowrap">🏦 ארנק</button>
+      </div>
     </div>`;
   }).join('');
   el.innerHTML=`
@@ -10043,8 +10051,11 @@ function releasePotToOneM(evId,creditorFid,toFund){
   _refreshPotTransferModal(evId);
 }
 function releasePotManualM(evId,creditorFid,inpId,toFund){
-  const amt=parseFloat(document.getElementById(inpId)?.value||'0');
+  const inp=document.getElementById(inpId);
+  const amt=parseFloat(inp?.value||'0');
   if(!amt||amt<=0){showToast('הזן סכום');return;}
+  const max=parseFloat(inp?.max||'0');
+  if(max&&amt>max){showToast('אפשר להעביר עד ₪'+max.toLocaleString());return;}
   releasePotManual(evId,creditorFid,amt,toFund);
   const ev=events.find(e=>e.id===evId);
   if(ev&&evPotTotal(ev)>0)renderPotModal(ev);else closePotModal();
