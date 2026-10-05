@@ -4,6 +4,7 @@
 // With &fixId=<event id>&splitMethod=equal|percapita|weighted it instead sets
 // that event's split method (a one-off repair: editing used to reset a
 // cumulative event to "equal").
+// &full=1 returns every field of the matching events.
 const { getDb } = require('../_lib/firebaseAdmin');
 
 const FIELDS = ['id', 'name', 'date', 'dateISO', 'open', 'cumulative', 'participants', 'excluded', 'totalCost', 'expenses',
@@ -34,7 +35,8 @@ module.exports = async (req, res) => {
     res.status(200).json(out);
     return;
   }
-  const match = d => ((d && d.events) || []).filter(e => q && String(e.name || '').includes(q)).map(e => ({ ...pick(e), _otherKeys: Object.keys(e).filter(k => !FIELDS.includes(k)) }));
+  const full = req.query.full === '1';
+  const match = d => ((d && d.events) || []).filter(e => q && String(e.name || '').includes(q)).map(e => full ? e : ({ ...pick(e), _otherKeys: Object.keys(e).filter(k => !FIELDS.includes(k)) }));
   const live = (await db.doc('appData/familyPayments').get()).data();
   const backups = await db.collection('backups').get();
   const out = { live: match(live), backups: {} };
