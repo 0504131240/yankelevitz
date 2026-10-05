@@ -49,25 +49,26 @@
     <div class="fh-pill-btns">
       <!-- Countdown clocks — above the chat button, beside the calendar on desktop -->
       <div id="countdownSection"></div>
-      <button class="fh-pill-btn" style="position:relative;background:linear-gradient(135deg,#FF6B9D,#FF4757);box-shadow:0 4px 22px rgba(255,71,87,0.35)" onclick="openChatSheet()">
-        <span class="fh-pill-ico">💬</span>צ'אט
-        <span id="chatUnreadBadge" style="display:none;position:absolute;top:8px;left:16px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:#fff;color:#FF4757;font-size:12px;font-weight:800;align-items:center;justify-content:center;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,0.25)"></span>
-      </button>
-      <button class="fh-pill-btn" style="background:linear-gradient(135deg,#F6C453,#C9792B);box-shadow:0 4px 22px rgba(201,121,43,0.35)" onclick="openShabbatModal()">
-        <span class="fh-pill-ico">🕯️</span><span style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2"><span id="shabbatPillLbl">שבתות אצל אבא ואמא</span><small id="shabbatPillSub" style="font-size:12px;font-weight:600;opacity:.9"></small></span>
-      </button>
-      <button class="fh-pill-btn" style="background:linear-gradient(135deg,#43E97B,#0ABDE3);box-shadow:0 4px 22px rgba(67,233,123,0.35)" onclick="switchShell('pay')">
-        <span class="fh-pill-ico">💰</span>תשלומים
-      </button>
-      <button class="fh-pill-btn" id="pollBannerBtn" style="display:none;background:linear-gradient(135deg,#A78BFA,#7C3AED);box-shadow:0 4px 22px rgba(124,58,237,0.35)" onclick="openPollSheet()">
-        <span class="fh-pill-ico">🗳</span><span id="pollBannerLbl">סקר ממתין למילוי</span>
-      </button>
-      <button class="fh-pill-btn" style="background:linear-gradient(135deg,#8FBC5A,#4E9A4E);box-shadow:0 4px 22px rgba(78,154,78,0.35)" onclick="openFamilyTreeOverlay()">
-        <span class="fh-pill-ico">🌳</span>אילן יוחסין
-      </button>
-      <button class="fh-pill-btn" style="background:linear-gradient(135deg,#FBBF24,#E2711D);box-shadow:0 4px 22px rgba(226,113,29,0.35)" onclick="openRecipesOverlay()">
-        <span class="fh-pill-ico">🍲</span>מתכונים
-      </button>
+      <!-- Shabbat at the parents' — this week's parsha, tap a family to mark it -->
+      <div id="shabbatHomeCard" class="fh-shb-card"></div>
+      <div class="fh-tile-grid">
+        <button class="fh-tile" style="background:linear-gradient(135deg,#FF6B9D,#FF4757);box-shadow:0 6px 20px rgba(255,71,87,0.3)" onclick="openChatSheet()">
+          <span id="chatUnreadBadge" class="fh-tile-badge" style="display:none"></span>
+          <span class="fh-tile-ico">💬</span><span class="fh-tile-txt"><b>צ'אט</b></span>
+        </button>
+        <button class="fh-tile" style="background:linear-gradient(135deg,#43E97B,#0ABDE3);box-shadow:0 6px 20px rgba(10,189,227,0.3)" onclick="switchShell('pay')">
+          <span class="fh-tile-ico">💰</span><span class="fh-tile-txt"><b>תשלומים</b><small id="homeTilePaySub"></small></span>
+        </button>
+        <button class="fh-tile" style="background:linear-gradient(135deg,#FBBF24,#E2711D);box-shadow:0 6px 20px rgba(226,113,29,0.3)" onclick="openRecipesOverlay()">
+          <span class="fh-tile-ico">🍲</span><span class="fh-tile-txt"><b>מתכונים</b></span>
+        </button>
+        <button class="fh-tile" style="background:linear-gradient(135deg,#8FBC5A,#4E9A4E);box-shadow:0 6px 20px rgba(78,154,78,0.3)" onclick="openFamilyTreeOverlay()">
+          <span class="fh-tile-ico">🌳</span><span class="fh-tile-txt"><b>אילן יוחסין</b></span>
+        </button>
+        <button class="fh-tile fh-tile-wide" id="pollBannerBtn" style="display:none;background:linear-gradient(135deg,#A78BFA,#7C3AED);box-shadow:0 6px 20px rgba(124,58,237,0.3)" onclick="openPollSheet()">
+          <span class="fh-tile-ico">🗳</span><span class="fh-tile-txt"><b id="pollBannerLbl">סקר ממתין למילוי</b></span>
+        </button>
+      </div>
     </div>
     <!-- Family calendar card — below on mobile, right on desktop -->
     <div class="fh-card fh-cal-card" style="margin:0">

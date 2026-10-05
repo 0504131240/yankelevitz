@@ -6407,12 +6407,21 @@ function _shbLat(d){return d.getDate()+'.'+(d.getMonth()+1);}
 function _shbVisitors(){const h=_shbHost();return families.filter(f=>!f.subFamily&&(!h||f.id!==h.id));}
 function _shbShort(f){return f.name.replace('משפחת','').trim();}
 function _shbFams(key){return ((shabbatVisits[key]||{}).fams||[]).map(getFam).filter(Boolean);}
+// The home card: this week's parsha and every family as a chip — tapping a
+// chip marks/unmarks it for this Shabbat; the header opens the full window.
 function renderShabbatPill(){
-  const sub=document.getElementById('shabbatPillSub');if(!sub)return;
-  const lbl=document.getElementById('shabbatPillLbl');if(lbl)lbl.textContent='שבתות אצל '+_shbHostName();
-  const fams=_shbFams(_shbKey(_shbThis()));
-  const p=_shbParsha(_shbThis()),when=p?_shbTitle(_shbThis()):'השבת';
-  sub.textContent=when+': '+(fams.length?fams.map(_shbShort).join(', '):'עוד לא נרשם מי מגיע');
+  const el=document.getElementById('shabbatHomeCard');
+  const paySub=document.getElementById('homeTilePaySub');
+  if(paySub){const n=events.filter(e=>e.open).length;paySub.textContent=n?n+(n===1?' אירוע פתוח':' אירועים פתוחים'):'';}
+  if(!el)return;
+  const d=_shbThis(),key=_shbKey(d),on=new Set((shabbatVisits[key]||{}).fams||[]);
+  const p=_shbParsha(d);
+  el.innerHTML=`<div class="fh-shb-top" onclick="openShabbatModal()" role="button" tabindex="0">
+      <span class="ic">🕯️</span>
+      <div><div class="ttl">השבת אצל ${esc(_shbHostName())}</div><div class="p">${esc(p?_shbTitle(d):'שבת '+_shbHeb(d))}</div></div>
+      <span class="fh-shb-more">כל השבתות ›</span>
+    </div>
+    <div class="fh-shb-chips">${_shbVisitors().map(f=>`<button type="button" class="${on.has(f.id)?'on':''}" aria-pressed="${on.has(f.id)}" onclick="toggleShabbatFam('${key}',${f.id})">${on.has(f.id)?'✓ ':''}${esc(_shbShort(f))}</button>`).join('')}</div>`;
 }
 let _shbOpen=false,_shbShowPast=8,_shbTab='list';
 function _shbEnsureModal(){

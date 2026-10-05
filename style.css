@@ -231,6 +231,26 @@ body:not(.at-home){padding-bottom:140px}
 .fh-pill-btn{width:100%;height:72px;border-radius:36px;border:none;display:flex;align-items:center;justify-content:center;gap:12px;font-family:var(--font);font-size:17px;font-weight:800;color:#fff;cursor:pointer;transition:transform .15s;box-shadow:0 4px 18px rgba(0,0,0,0.15)}
 .fh-pill-btn:active{transform:scale(0.96)}
 .fh-pill-ico{font-size:28px;line-height:1}
+/* Home: Shabbat card + 2-column tiles (direction set explicitly — on desktop
+   .fh-home-lower is ltr for its two-column layout) */
+.fh-shb-card{direction:rtl;border-radius:22px;background:linear-gradient(135deg,#F6C453,#C9792B);color:#fff;padding:14px 16px;box-shadow:0 6px 22px rgba(201,121,43,.35)}
+.fh-shb-top{display:flex;align-items:center;gap:10px;cursor:pointer}
+.fh-shb-top .ic{font-size:30px;line-height:1}
+.fh-shb-top .ttl{font-size:12px;font-weight:700;opacity:.92}
+.fh-shb-top .p{font-size:20px;font-weight:800;line-height:1.2}
+.fh-shb-more{margin-inline-start:auto;flex-shrink:0;font-size:12px;font-weight:700;background:rgba(255,255,255,.22);padding:5px 10px;border-radius:12px;white-space:nowrap}
+.fh-shb-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.fh-shb-chips button{font-family:var(--font);font-size:12px;font-weight:700;padding:6px 11px;border-radius:16px;background:rgba(255,255,255,.18);border:1.5px solid rgba(255,255,255,.55);color:#fff;cursor:pointer}
+.fh-shb-chips button.on{background:#fff;color:#A55A16;border-color:#fff}
+.fh-tile-grid{direction:rtl;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fh-tile{position:relative;height:108px;border:none;border-radius:22px;color:#fff;padding:14px;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;text-align:right;font-family:var(--font);cursor:pointer;transition:transform .15s}
+.fh-tile:active{transform:scale(0.96)}
+.fh-tile-ico{font-size:32px;line-height:1}
+.fh-tile-txt b{display:block;font-size:17px;font-weight:800}
+.fh-tile-txt small{display:block;font-size:11px;font-weight:600;opacity:.92;margin-top:2px}
+.fh-tile-txt small:empty{display:none}
+.fh-tile-wide{grid-column:1/-1;height:72px;flex-direction:row;align-items:center;justify-content:flex-start;gap:12px}
+.fh-tile-badge{position:absolute;top:10px;left:10px;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#fff;color:#FF4757;font-size:12px;font-weight:800;align-items:center;justify-content:center;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,.2)}
 @media(min-width:600px){
   .fh-home-lower{flex-direction:row;direction:ltr;align-items:flex-start}
   .fh-pill-btns{flex:1;padding-top:8px}
