@@ -297,10 +297,19 @@ function build(){
     </div>
   </div>
 
+  <div class="rc-modal" id="rcImportModal" onclick="if(event.target===this)rcCloseModal('rcImportModal')">
+    <div class="rc-sheet">
+      <div class="rc-sheet-hd"><b>📚 ייבוא מתכונים מ-PDF</b><button class="rc-x" onclick="rcCloseModal('rcImportModal')">✕</button></div>
+      <div class="rc-sheet-bd" id="rcImportBody"></div>
+      <div class="rc-sheet-ft" id="rcImportFt"></div>
+    </div>
+  </div>
+
   <div class="rc-zoom" id="rcZoom" onclick="this.classList.remove('open')"><img id="rcZoomImg" alt=""></div>
   <div class="rc-timers" id="rcTimers"></div>
   <input type="file" accept="image/*" id="rcPhotoInp" style="display:none" onchange="rcPickPhoto(this)">
-  <input type="file" accept="image/*" multiple id="rcScanInp" style="display:none" onchange="rcScanFiles(this)">`;
+  <input type="file" accept="image/*" multiple id="rcScanInp" style="display:none" onchange="rcScanFiles(this)">
+  <input type="file" accept="application/pdf,.pdf" id="rcPdfInp" style="display:none" onchange="rcImportPdf(this)">`;
   document.body.appendChild(el);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&$('rcCook')&&$('rcCook').classList.contains('open'))acquireWake();});
 }
@@ -1104,7 +1113,7 @@ function renderEditor(){
   $('rcEditBody').innerHTML=`
     ${SCAN_ENABLED?`<div class="rc-scanbox${S.scanning?' busy':''}">
       ${S.scanning?`<div class="rc-scan-spin">📖</div><b>קוראים את המתכון...</b><small>זה לוקח בדרך כלל 10–30 שניות</small>`
-      :`<button type="button" onclick="rcScanPick()"><span>📸</span><div><b>סריקת מתכון מתמונה</b><small>צלמו את הפתק, הדף מהספר או צילום מסך — והשדות יתמלאו לבד</small></div></button>`}
+      :`<button type="button" onclick="rcScanPick()"><span>📸</span><div><b>סריקת מתכון מתמונה</b><small>צלמו את הפתק, הדף מהספר או צילום מסך — והשדות יתמלאו לבד</small></div></button>${e.id?'':`<button type="button" class="rc-scan-pdf" onclick="rcImportPick()"><span>📚</span><div><b>ייבוא ספר מתכונים מקובץ PDF</b><small>כל המתכונים שבקובץ נקראים בבת אחת — בודקים ושומרים</small></div></button>`}`}
     </div>`:''}
     <div class="rc-f"><label>שם המתכון *</label><input type="text" id="rcEdTitle" value="${E(e.title)}" placeholder="לדוגמה: עוגת השמרים של סבתא"><div class="rc-err" id="rcEdTitleErr">צריך לתת למתכון שם</div></div>
     <div class="rc-f"><label>תמונות</label>
@@ -1233,6 +1242,138 @@ window.rcScanFiles=async function(inp){
     S.scanning=false;if(S.edit)renderEditor();
     toast('⚠️ '+err.message,4500);
   }
+};
+// ── import a whole cookbook PDF ─────────────────────────────────────────────
+// pdf.js (cdnjs) draws each page as a picture, and every page goes through
+// /api/recipe-scan in multi mode — a page can hold several recipes, or the
+// end of one that started on the page before. The family then ticks which
+// recipes to keep and saves them all at once.
+const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+let _pdfJs=null;
+function loadPdfJs(){
+  if(window.pdfjsLib)return Promise.resolve(window.pdfjsLib);
+  if(_pdfJs)return _pdfJs;
+  _pdfJs=new Promise((res,rej)=>{
+    const sc=document.createElement('script');sc.src=PDFJS+'pdf.min.js';
+    sc.onload=()=>{window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS+'pdf.worker.min.js';res(window.pdfjsLib);};
+    sc.onerror=()=>{_pdfJs=null;rej(new Error('pdf.js'));};
+    document.head.appendChild(sc);
+  });
+  return _pdfJs;
+}
+function canvasJpeg(c,maxLen,q){let out=c.toDataURL('image/jpeg',q);while(out.length>maxLen&&q>0.4){q-=0.08;out=c.toDataURL('image/jpeg',q);}return out;}
+async function renderPdfPage(pdf,n){
+  const page=await pdf.getPage(n);
+  const v1=page.getViewport({scale:1});
+  const k=Math.min(3,1600/Math.max(v1.width,v1.height));
+  const v=page.getViewport({scale:k});
+  const c=document.createElement('canvas');c.width=Math.round(v.width);c.height=Math.round(v.height);
+  const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+  await page.render({canvasContext:ctx,viewport:v}).promise;
+  const scanImg=canvasJpeg(c,1500000,0.85);
+  // A smaller copy is kept with each recipe as its "original page" picture;
+  // the recipe doc must stay well under Firestore's 1MB.
+  const s=Math.min(1,1100/Math.max(c.width,c.height));
+  const c2=document.createElement('canvas');c2.width=Math.round(c.width*s);c2.height=Math.round(c.height*s);
+  const x2=c2.getContext('2d');x2.fillStyle='#fff';x2.fillRect(0,0,c2.width,c2.height);x2.drawImage(c,0,0,c2.width,c2.height);
+  return {scanImg,keepImg:canvasJpeg(c2,300000,0.7)};
+}
+async function scanPage(img){
+  if(window.RECIPES_SCAN_MOCK)return window.RECIPES_SCAN_MOCK([img],true);
+  // Gemini's free tier allows only a few requests a minute — when it says
+  // "busy", wait and retry rather than skipping the page.
+  for(let i=0;;i++){
+    const r=await fetch('/api/recipe-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({images:[img],multi:true})});
+    let d={};try{d=await r.json();}catch(e){}
+    if(r.ok)return d.recipes||[];
+    if(r.status===429&&i<4&&!(S.imp&&S.imp.stop)){await new Promise(z=>setTimeout(z,[10,20,40,60][i]*1000));continue;}
+    throw new Error(d.error||String(r.status));
+  }
+}
+window.rcImportPick=function(){if(S.imp&&S.imp.running){rcCloseEditor();openImport();return;}$('rcPdfInp').value='';$('rcPdfInp').click();};
+function openImport(){renderImport();$('rcImportModal').classList.add('open');}
+window.rcImportPdf=async function(inp){
+  const file=inp.files&&inp.files[0];if(!file)return;
+  rcCloseEditor();
+  S.imp={running:true,stop:false,page:0,pages:0,items:[],failed:[],name:file.name};
+  openImport();
+  try{
+    const lib=await loadPdfJs();
+    const pdf=await lib.getDocument({data:await file.arrayBuffer()}).promise;
+    S.imp.pages=pdf.numPages;renderImport();
+    const have=new Set(S.recipes.map(r=>String(r.title||'').trim()));
+    for(let n=1;n<=pdf.numPages&&!S.imp.stop;n++){
+      S.imp.page=n;renderImport();
+      try{
+        const {scanImg,keepImg}=await renderPdfPage(pdf,n);
+        const found=await scanPage(scanImg);
+        found.forEach(x=>{
+          const last=S.imp.items[S.imp.items.length-1];
+          if(x.continuesPrevious&&last){
+            last.ingredients=last.ingredients.concat(x.ingredients);last.steps=last.steps.concat(x.steps);
+            if(x.tips)last.tips=last.tips?last.tips+'\n'+x.tips:x.tips;
+            if(!last.cookMin&&x.cookMin)last.cookMin=x.cookMin;
+            last.pageTo=n;return;
+          }
+          const title=x.title||'מתכון מעמוד '+n;
+          S.imp.items.push({...x,title,page:n,pageTo:n,img:keepImg,dup:have.has(title),on:!have.has(title)});
+        });
+      }catch(err){console.warn('page',n,err);S.imp.failed.push(n);}
+      renderImport();
+    }
+  }catch(err){
+    console.warn(err);S.imp.error=err.message==='pdf.js'?'לא הצלחנו לטעון את קורא ה-PDF — בדקו את החיבור לאינטרנט':'לא הצלחנו לפתוח את הקובץ';
+  }
+  S.imp.running=false;renderImport();
+};
+window.rcImportStop=function(){if(S.imp)S.imp.stop=true;renderImport();};
+window.rcImportToggle=function(i){const it=S.imp.items[i];it.on=!it.on;renderImport();};
+window.rcImportAll=function(on){S.imp.items.forEach(it=>it.on=on);renderImport();};
+window.rcImportTitle=function(i,v){S.imp.items[i].title=v.trim()||S.imp.items[i].title;};
+function renderImport(){
+  const b=$('rcImportBody'),ft=$('rcImportFt'),m=S.imp;if(!b||!m)return;
+  const sel=m.items.filter(it=>it.on).length;
+  const pct=m.pages?Math.round((m.running?m.page-1:m.pages)/m.pages*100):0;
+  b.innerHTML=`
+    <div class="rc-imp-file">📄 ${E(m.name)}${m.pages?` · ${m.pages} עמודים`:''}</div>
+    ${m.error?`<div class="rc-imp-err">⚠️ ${E(m.error)}</div>`:''}
+    ${m.running?`<div class="rc-imp-prog"><div><span>${m.pages?`קוראים עמוד ${m.page} מתוך ${m.pages}`:'פותחים את הקובץ...'}</span><b>${pct}%</b></div><i style="width:${pct}%"></i>
+      <small>${m.stop?'עוצרים אחרי העמוד הזה...':'זה לוקח כ-10–30 שניות לעמוד. אפשר להשאיר את החלון פתוח ולחכות.'}</small></div>`
+      :m.pages&&!m.error?`<div class="rc-imp-done">✓ ${m.stop?'נעצר אחרי עמוד '+m.page:'כל העמודים נקראו'} · נמצאו ${m.items.length} מתכונים${m.failed.length?` · לא הצלחנו לקרוא את עמודים ${m.failed.join(', ')}`:''}</div>`:''}
+    ${m.items.length?`<div class="rc-imp-bar"><span>${sel} מתוך ${m.items.length} מסומנים</span><button type="button" onclick="rcImportAll(true)">סמן הכל</button><button type="button" onclick="rcImportAll(false)">נקה</button></div>`:''}
+    <div class="rc-imp-list">${m.items.map((it,i)=>`
+      <div class="rc-imp-item${it.on?' on':''}">
+        <button type="button" class="rc-imp-chk" onclick="rcImportToggle(${i})" aria-label="בחירה">${it.on?'✓':''}</button>
+        <img src="${it.img}" alt="" onclick="rcZoom(this.src)">
+        <div><input type="text" value="${E(it.title)}" onchange="rcImportTitle(${i},this.value)" aria-label="שם המתכון">
+          <small>עמוד ${it.page}${it.pageTo>it.page?'–'+it.pageTo:''} · ${it.ingredients.length} מצרכים · ${it.steps.length} שלבים${it.dup?' · <b>כבר קיים בספר</b>':''}</small></div>
+      </div>`).join('')}</div>`;
+  ft.innerHTML=m.running
+    ?`<button class="rc-btn ghost" onclick="rcImportStop()"${m.stop?' disabled':''}>⏹ עצירה</button><button class="rc-btn ghost" onclick="rcCloseModal('rcImportModal')">הסתר</button>`
+    :`<button class="rc-btn ghost" onclick="rcCloseModal('rcImportModal')">סגירה</button><button class="rc-btn" id="rcImportSave" onclick="rcImportSave()"${sel?'':' disabled'}>שמירת ${sel} מתכונים</button>`;
+}
+window.rcImportSave=async function(){
+  const m=S.imp;if(!m||m.running)return;
+  const list=m.items.filter(it=>it.on);if(!list.length)return;
+  const btn=$('rcImportSave');btn.disabled=true;
+  const me=myName();let ok=0;
+  for(const it of list){
+    btn.textContent=`שומר ${ok+1} מתוך ${list.length}...`;
+    const now=Date.now(),cat=CATS.some(c=>c.id===it.category)?it.category:'other';
+    const r={
+      id:'r'+now.toString(36)+Math.random().toString(36).slice(2,6),
+      title:it.title,emoji:'',categories:[cat],category:cat,kosher:it.kosher||'',tags:(it.tags||[]).filter(t=>holOf(t)),
+      prepMin:+it.prepMin||0,cookMin:+it.cookMin||0,servings:+it.servings||0,difficulty:0,
+      ingredients:it.ingredients.join('\n'),steps:it.steps.join('\n'),story:'',origin:'',tips:it.tips||'',
+      photo:null,scan:it.img||null,
+      createdBy:me,createdAt:now,deviceId:deviceId(),updatedAt:now,updatedBy:me,
+      madeCount:0,madeBy:[],comments:[]
+    };
+    try{await S.store.put(r,true);ok++;it.on=false;it.dup=true;if(!S.recipes.some(x=>x.id===r.id))S.recipes.push(r);}
+    catch(err){console.warn(err);toast('⚠️ השמירה של "'+it.title+'" נכשלה: '+(err.code||err.message||''),4500);break;}
+  }
+  renderImport();
+  if(ok){toast('🎉 '+ok+' מתכונים נוספו לספר המשפחתי!');celebrate();}
 };
 window.rcSaveRecipe=async function(){
   if(S.scanning){toast('רגע, הסריקה עוד לא הסתיימה');return;}

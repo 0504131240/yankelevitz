@@ -6,6 +6,9 @@
 //          shows the scan box once the key exists — no redeploy needed.
 //   POST {images:[dataUrl, ...]} (1–3 JPEG/PNG/WebP, e.g. a recipe spread
 //        over two pages) → {recipe:{title, ingredients[], steps[], ...}}
+//   POST {images:[dataUrl], multi:true} — one page of a cookbook (the PDF
+//        import) → {recipes:[...]}: every recipe on the page, possibly none;
+//        continuesPrevious marks one that started on the page before.
 // Env: GEMINI_API_KEY (Google AI Studio), optional GEMINI_MODEL.
 // Same-origin only, so other sites can't use up the key's daily quota.
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
@@ -34,6 +37,25 @@ const SCHEMA = {
   },
   required: ['isRecipe', 'title', 'ingredients', 'steps', 'servings', 'prepMin', 'cookMin', 'tips', 'category', 'kosher', 'tags']
 };
+
+const MULTI_SCHEMA = {
+  type: 'object',
+  properties: {
+    recipes: {
+      type: 'array',
+      items: {
+        ...SCHEMA,
+        properties: { ...SCHEMA.properties, continuesPrevious: { type: 'boolean', description: 'true only for text at the top of the page that continues a recipe begun on the previous page (no title of its own)' } },
+        required: [...SCHEMA.required, 'continuesPrevious']
+      }
+    }
+  },
+  required: ['recipes']
+};
+
+const MULTI_NOTE = `
+
+This image is ONE PAGE of a cookbook. It may hold several recipes, exactly one, or none (a cover, table of contents, blank page). Return every recipe on the page, in reading order, as {"recipes":[...]} where each item has the keys above plus continuesPrevious. If the page starts with ingredients or steps that have no title and clearly continue a recipe from the previous page, return that part as the first item with continuesPrevious true and title "". A page with no recipe returns {"recipes":[]}. Hebrew pages are laid out right to left; quantities and fractions (½, ¾) belong to the line they sit on.`;
 
 const SYSTEM = `You transcribe photographed recipes for a Hebrew-speaking family's recipe book. The photo may be a handwritten card (often old, faded, or in a grandparent's handwriting), a cookbook page, a magazine clipping, or a screenshot. Several images are parts of the same recipe, in order.
 
@@ -77,24 +99,24 @@ function parseJson(text) {
 
 // "High demand" (503) from Gemini is usually a passing spike: try twice
 // more, a moment apart, then GEMINI_FALLBACK_MODEL if one is set.
-async function callGemini(parts, withSchema) {
+async function callGemini(parts, withSchema, multi) {
   const models = [MODEL, MODEL, MODEL, process.env.GEMINI_FALLBACK_MODEL].filter(Boolean);
   let res;
   for (let i = 0; i < models.length; i++) {
     if (i) await new Promise(r => setTimeout(r, i === 1 ? 800 : 1600));
-    res = await callGeminiOnce(models[i], parts, withSchema);
+    res = await callGeminiOnce(models[i], parts, withSchema, multi);
     if (res.status !== 503) break;
   }
   return res;
 }
-async function callGeminiOnce(model, parts, withSchema) {
+async function callGeminiOnce(model, parts, withSchema, multi) {
   const generationConfig = { responseMimeType: 'application/json' };
-  if (withSchema) generationConfig.responseJsonSchema = SCHEMA;
+  if (withSchema) generationConfig.responseJsonSchema = multi ? MULTI_SCHEMA : SCHEMA;
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM }] },
+      systemInstruction: { parts: [{ text: multi ? SYSTEM + MULTI_NOTE : SYSTEM }] },
       contents: [{ role: 'user', parts }],
       generationConfig
     })
@@ -113,6 +135,7 @@ module.exports = async (req, res) => {
   if (!configured) { res.status(503).json({ error: 'not configured' }); return; }
 
   const images = Array.isArray(req.body && req.body.images) ? req.body.images : [];
+  const multi = !!(req.body && req.body.multi);
   if (!images.length || images.length > MAX_IMAGES) { res.status(400).json({ error: 'send 1-3 images' }); return; }
   const parts = [];
   for (const img of images) {
@@ -121,14 +144,14 @@ module.exports = async (req, res) => {
     if (m[2].length > MAX_B64) { res.status(413).json({ error: 'image too large' }); return; }
     parts.push({ inlineData: { mimeType: m[1], data: m[2] } });
   }
-  parts.push({ text: images.length > 1 ? `These ${images.length} images are one recipe, in order. Transcribe it.` : 'Transcribe this recipe.' });
+  parts.push({ text: multi ? 'Transcribe every recipe on this cookbook page.' : images.length > 1 ? `These ${images.length} images are one recipe, in order. Transcribe it.` : 'Transcribe this recipe.' });
 
   try {
-    let { status, data } = await callGemini(parts, true);
+    let { status, data } = await callGemini(parts, true, multi);
     // An API version that doesn't know responseJsonSchema rejects the whole
     // request; the system prompt alone still asks for the same JSON shape.
     if (status === 400 && /responseJsonSchema|response_json_schema|Unknown name/i.test(JSON.stringify(data))) {
-      ({ status, data } = await callGemini(parts, false));
+      ({ status, data } = await callGemini(parts, false, multi));
     }
     if (status === 429 || status === 503) { res.status(429).json({ error: 'busy, try again' }); return; }
     if (status !== 200) {
@@ -138,6 +161,14 @@ module.exports = async (req, res) => {
     }
     const cand = (data.candidates || [])[0];
     const text = cand && cand.content && (cand.content.parts || []).map(p => p.text || '').join('');
+    if (multi) {
+      const list = text ? parseJson(text) : {};
+      const arr = Array.isArray(list) ? list : Array.isArray(list.recipes) ? list.recipes : [];
+      const recipes = arr.slice(0, 12).map(x => ({ ...normalize(x || {}), continuesPrevious: !!(x && x.continuesPrevious) }))
+        .filter(r => r.isRecipe && (r.ingredients.length || r.steps.length));
+      res.status(200).json({ recipes });
+      return;
+    }
     if (!text) { res.status(422).json({ error: 'no recipe found' }); return; }
     const recipe = normalize(parseJson(text));
     if (!recipe.isRecipe || (!recipe.ingredients.length && !recipe.steps.length)) { res.status(422).json({ error: 'no recipe found' }); return; }

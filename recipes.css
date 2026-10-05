@@ -268,3 +268,25 @@ li.done .rc-ing-tx{text-decoration:line-through;opacity:.45}
 .rc-step-sec:first-child{padding-top:0}
 .rc-shop-from{font-size:12px;font-weight:700;color:var(--rc-accent2);background:var(--rc-accent-bg);border-radius:12px;padding:7px 11px;margin-bottom:10px;line-height:1.5}
 .rc-shop-src{display:block;font-size:11px;color:var(--rc-ink2);font-weight:500;margin-top:1px}
+/* PDF import */
+.rc-scanbox>button.rc-scan-pdf{border-top:1.5px dashed #F59E0B}
+.rc-imp-file{font-size:13px;font-weight:700;color:var(--text2,#555);margin-bottom:10px;word-break:break-all}
+.rc-imp-err{background:#FEE2E2;color:#991B1B;border-radius:12px;padding:10px 12px;font-size:13px;font-weight:600;margin-bottom:10px}
+.rc-imp-prog{background:#FFF7ED;border-radius:14px;padding:12px 14px;margin-bottom:12px;position:relative}
+.rc-imp-prog>div{display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:#5B2C06;margin-bottom:8px}
+.rc-imp-prog>i{display:block;height:8px;border-radius:4px;background:#F59E0B;transition:width .3s}
+.rc-imp-prog small{display:block;font-size:11px;color:#7C4A1A;margin-top:8px}
+.rc-imp-done{background:#ECFDF5;color:#065F46;border-radius:12px;padding:10px 12px;font-size:13px;font-weight:700;margin-bottom:12px;line-height:1.5}
+.rc-imp-bar{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;margin-bottom:8px}
+.rc-imp-bar span{flex:1}
+.rc-imp-bar button{border:1.5px solid #E5E7EB;background:none;border-radius:10px;padding:4px 10px;font-size:12px;font-weight:700;font-family:inherit;color:inherit;cursor:pointer}
+.rc-imp-list{display:flex;flex-direction:column;gap:8px}
+.rc-imp-item{display:flex;align-items:center;gap:10px;border:1.5px solid #E5E7EB;border-radius:14px;padding:8px 10px;opacity:.6}
+.rc-imp-item.on{opacity:1;border-color:#F59E0B}
+.rc-imp-chk{flex-shrink:0;width:26px;height:26px;border-radius:8px;border:2px solid #D1D5DB;background:none;font-size:15px;font-weight:800;color:#fff;cursor:pointer;padding:0}
+.rc-imp-item.on .rc-imp-chk{background:#F59E0B;border-color:#F59E0B}
+.rc-imp-item img{flex-shrink:0;width:44px;height:58px;object-fit:cover;border-radius:6px;border:1px solid #E5E7EB;cursor:zoom-in}
+.rc-imp-item>div{flex:1;min-width:0}
+.rc-imp-item input{width:100%;box-sizing:border-box;border:1.5px solid transparent;border-radius:8px;padding:4px 6px;font-size:14px;font-weight:700;font-family:inherit;background:none;color:inherit}
+.rc-imp-item input:focus{border-color:#F59E0B;outline:none}
+.rc-imp-item small{display:block;font-size:11px;opacity:.75;padding:0 6px}
