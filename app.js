@@ -5293,7 +5293,7 @@ function payToPot(evId,famId,amt){
   if(!ev.potPayments)ev.potPayments=[];
   ev.potPayments.push({famId,amt:payment});
   const _pf=getFam(famId);
-  _notifMoney('💰',(_pf?_pf.name.replace('משפחת','').trim():'')+' הפקיד/ה ₪'+payment.toLocaleString()+' לקופת "'+ev.name+'"',ev.participants,_hideFromAllBut(ev.participants),[]);
+  _notifMoney('💰',(_pf?_pf.name.replace('משפחת','').trim():'')+' הפקיד/ה ₪'+payment.toLocaleString()+' לקופת "'+ev.name+'"',ev.participants,_hideFromAllBut(ev.participants),[],false,[famId]);
   save();render();
   if(ev.closed){const nb=evAdjBalance(ev)[famId]||0;if(nb>=-0.5)_sendCloseEvEmailOne(ev,famId);}
 }
@@ -7485,7 +7485,7 @@ function renderVisitLog(){
 // get their own summary email. Skipping the category-broadcast EMAIL for
 // them avoids a duplicate in their inbox, without touching the bell entry
 // or push, which they still see/get normally like anyone else.
-function addNotif(icon,text,pushTarget,hiddenFromFamIds,kind,relatedFamIds,excludeEmailFamIds,noPhone){
+function addNotif(icon,text,pushTarget,hiddenFromFamIds,kind,relatedFamIds,excludeEmailFamIds,noPhone,phoneFamIds){
   // Omit hiddenFrom entirely rather than setting it to undefined — most
   // calls don't pass a hide list at all, and Firestore's setDoc throws
   // outright on any undefined anywhere in the write, which would silently
@@ -7495,7 +7495,7 @@ function addNotif(icon,text,pushTarget,hiddenFromFamIds,kind,relatedFamIds,exclu
   if(notifications.length>200)notifications.length=200;
   renderNotifCenterBadge();
   const emailOptedSlots=_sendCategoryEmails(icon,text,kind,hiddenFromFamIds,relatedFamIds,excludeEmailFamIds);
-  _sendPush(icon+' ינקלביץ',text,pushTarget,hiddenFromFamIds,kind,relatedFamIds,emailOptedSlots,noPhone);
+  _sendPush(icon+' ינקלביץ',text,pushTarget,hiddenFromFamIds,kind,relatedFamIds,emailOptedSlots,noPhone,phoneFamIds);
 }
 // A notification that's only ever "about" specific families (a personal
 // wallet/goal-fund deposit or withdrawal) shouldn't reach anyone else at
@@ -7520,8 +7520,8 @@ function _hideFromAllBut(keepVisibleFor,extraHidden){
 // the bell for everyone not in hiddenFrom; push goes to relatedFamIds plus
 // any device that opted into 💰; email to whoever checked the 💰 category,
 // except directEmailed families who already get their own confirmation.
-function _notifMoney(icon,text,relatedFamIds,hiddenFrom,directEmailed,noPhone){
-  addNotif(icon,text,undefined,hiddenFrom,'money',relatedFamIds,directEmailed,noPhone);
+function _notifMoney(icon,text,relatedFamIds,hiddenFrom,directEmailed,noPhone,phoneFamIds){
+  addNotif(icon,text,undefined,hiddenFrom,'money',relatedFamIds,directEmailed,noPhone,phoneFamIds);
 }
 // A goal fund's own hide list (e.g. the family a surprise gift is for).
 const _goalHidden=g=>(g.hiddenFrom||[]).filter(id=>id!=null);
@@ -7580,8 +7580,11 @@ const _visibleNotifs=()=>{
 // every in-app notification-center event, so family members get it even
 // when the app is closed — not just the in-app bell. Best-effort: silently
 // ignored if it fails (e.g. offline, or the API route isn't deployed yet).
-function _sendPush(title,body,target,excludeFamIds,kind,relatedFamIds,excludeSlots,noPhone){
-  fetch('/api/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminPass,title,body,target:target||'all',excludeFamIds,kind,relatedFamIds,excludeSlots,...(noPhone?{noPhone:true}:{})})}).catch(()=>{});
+// phoneFamIds: the families a kosher-phone call about this is for, when that's
+// narrower than relatedFamIds (a pot deposit concerns the whole event, but
+// only the family that deposited gets a call).
+function _sendPush(title,body,target,excludeFamIds,kind,relatedFamIds,excludeSlots,noPhone,phoneFamIds){
+  fetch('/api/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminPass,title,body,target:target||'all',excludeFamIds,kind,relatedFamIds,excludeSlots,...(noPhone?{noPhone:true}:{}),...(phoneFamIds?{phoneFamIds}:{})})}).catch(()=>{});
 }
 function _notifLastSeen(){return parseInt(localStorage.getItem('notifLastSeen')||'0');}
 function renderNotifCenterBadge(){
@@ -10187,7 +10190,7 @@ function doDepositToCumPot(){
   }
   ev.potPayments.push({famId:savedFamId,amt:roundAmt,fromFund});
   const _cpName=(getFam(savedFamId)||{}).name?.replace('משפחת','').trim()||'';
-  _notifMoney('💰',_cpName+' הפקיד/ה ₪'+Math.round(roundAmt).toLocaleString()+' לקופת "'+ev.name+'"'+(fromFund?' (מהארנק)':''),ev.participants,_hideFromAllBut(ev.participants),[savedFamId]);
+  _notifMoney('💰',_cpName+' הפקיד/ה ₪'+Math.round(roundAmt).toLocaleString()+' לקופת "'+ev.name+'"'+(fromFund?' (מהארנק)':''),ev.participants,_hideFromAllBut(ev.participants),[savedFamId],false,[savedFamId]);
   closeCumPot();
   save();render();
   const _potF=getFam(savedFamId);
