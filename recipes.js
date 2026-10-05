@@ -728,8 +728,12 @@ function printScript(){
     if(duplex&&r.photo)newPage('photo',`<img src="${r.photo}" alt=""><div class="ph-cap">${esc(r.title)}</div>`);
     padToFront();
   });
-  if(D.toc)pages.forEach((p,i)=>{const n=p.querySelector('.pno');if(n&&!p.querySelector('.cover'))n.textContent=i+1;});
-  tocRows.forEach((row,i)=>{row.querySelector('b').textContent=starts[i]+1;});
+  // Page numbers count content only: a dish photo or an empty back is the
+  // reverse of the card before it, not a page of its own.
+  const pageNo=[];let no=0;
+  pages.forEach((p,i)=>{if(!p.querySelector('.photo,.blank'))no++;pageNo[i]=no;});
+  if(D.toc)pages.forEach((p,i)=>{const n=p.querySelector('.pno');if(n&&!p.querySelector('.cover'))n.textContent=pageNo[i];});
+  tocRows.forEach((row,i)=>{row.querySelector('b').textContent=pageNo[starts[i]];});
   // Deal onto sheets: one card per page, or three across a landscape A4.
   // Double-sided A4: the back sheet holds the same three cards' backs in
   // reverse order, so each lands behind its front after a short-edge flip.
