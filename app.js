@@ -6388,6 +6388,19 @@ function _shbDate(key){const [y,m,d]=key.split('-').map(Number);return new Date(
 // This week's Saturday (today, if it is Saturday).
 function _shbThis(){const d=new Date();d.setHours(12,0,0,0);d.setDate(d.getDate()+((6-d.getDay()+7)%7));return d;}
 function _shbAdd(d,weeks){const x=new Date(d);x.setDate(x.getDate()+7*weeks);return x;}
+// The weekly Torah portion (Israel schedule), one character per Saturday from
+// 4.1.2020 to the end of 2045 — generated with @hebcal/core, since the
+// browser's Hebrew calendar has no parsha. Each character indexes _SHB_P.
+const _SHB_P=["ויגש", "ויחי", "שמות", "וארא", "בא", "בשלח", "יתרו", "משפטים", "תרומה", "תצוה", "כי תשא", "ויקהל-פקודי", "ויקרא", "צו", "חול המועד פסח", "שמיני", "תזריע-מצרע", "אחרי מות-קדשים", "אמור", "בהר-בחקתי", "במדבר", "נשא", "בהעלתך", "שלח לך", "קורח", "חוקת", "בלק", "פינחס", "מטות-מסעי", "דברים", "ואתחנן", "עקב", "ראה", "שופטים", "כי תצא", "כי תבוא", "נצבים-וילך", "ראש השנה", "האזינו", "סוכות", "שמחת תורה", "בראשית", "נח", "לך לך", "וירא", "חיי שרה", "תולדות", "ויצא", "וישלח", "וישב", "מקץ", "פסח", "נצבים", "וילך", "חול המועד סוכות", "ויקהל", "פקודי", "תזריע", "מצרע", "אחרי מות", "קדשים", "בהר", "בחקתי", "מטות", "מסעי", "יום כיפור"];
+const _SHB_PC='0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO0123456789abcdPfghijklmnopqrstuvwxyzQRCSFGHIJKLMNO0123456789aTUcdfVWPXYiZ@klmnopqr#$tuvwxyzQRCSFGHIJKLMNO0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO0123456789aTUcdfVWeXYiZ@klmnopqrstuvwxyzAC%SFGHIJKLMNO0123456789aTUcdPfghijklmnopqrstuvwxyzQRCSFGHIJKLMNO0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO0123456789aTUcdfVWeXYiZ@klmnopqrstuvwxyzABCDEFGHIJKLMNO0123456789abcdefghijklmnopqrstuvwxyzAC%SFGHIJKLMNO0123456789abcdPfghiZ@klmnopqrstuvwxyzQRCSFGHIJKLMNO0123456789aTUcdfVWeXYiZ@klmnopqrstuvwxyzABCDEFGHIJKLMNO0123456789abcdefghijklmnopqrstuvwxyzAC%SFGHIJKLMNO0123456789abcdPfghiZ@klmnopqrstuvwxyzQRCSFGHIJKLMNO0123456789aTUcdfVWeXYiZ@klmnopqrstuvwxyzABCDEFGHIJKLMNO0123456789abcdefghijklmnopqrstuvwxyzAC%SFGHIJKLMNO0123456789aTUcdfVWXeYiZ@klmnopqr#$tuvwxyzAC%SFGHIJKLMNO0123456789abcdPfghiZ@klmnopqrstuvwxyzQRCSFGHIJKLMNO0123456789abcdefghijklmnopqrstuvwxyzAC%SFGHIJKLMNO0123456789aTUcdfVWXeYiZ@klmnopqr#$tuvwxyzAC%SFGHIJKLMNO0123456789abcdPfghiZ@klmnopqrstuvwxyzQRCSFGHIJKLMNO0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO0123456789aTUcdfVWeXYiZ@klmnopqrstuvwxyzAC%SFGHIJKLMNO0123456789abcdPfghiZ@klmnopqrstuvwxyzQRCSFGHIJKLMNO0123456789aTUcdfVWPXYiZ@klmnopqr#$tuvwxyzQRCSFGHIJKLMNO0123456789abcdefghijklmnopqrstuvwxyzAC%SFGHIJKLMNO0123456789aTUcdPfghijklmnopqrstuvwxyzQRCSFGHIJKLMNO012';
+const _SHB_PA='0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%^*';
+function _shbParsha(d){
+  const w=Math.round((Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())-Date.UTC(2020,0,4))/(7*864e5));
+  const c=w>=0&&w<_SHB_PC.length?_SHB_PC[w]:null;
+  return c?_SHB_P[_SHB_PA.indexOf(c)]||'':'';
+}
+// 'פרשת נח', or the festival's own name when it falls on Shabbat.
+function _shbTitle(d){const p=_shbParsha(d);if(!p)return 'שבת '+_shbHeb(d);return /^(ראש השנה|יום כיפור|סוכות|שמחת תורה|פסח|חול המועד)/.test(p)?'שבת '+p:'פרשת '+p;}
 function _shbHeb(d){try{return new Intl.DateTimeFormat('he-IL-u-ca-hebrew',{day:'numeric',month:'long'}).format(d);}catch(e){return '';}}
 function _shbLat(d){return d.getDate()+'.'+(d.getMonth()+1);}
 function _shbVisitors(){const h=_shbHost();return families.filter(f=>!h||f.id!==h.id);}
@@ -6397,7 +6410,8 @@ function renderShabbatPill(){
   const sub=document.getElementById('shabbatPillSub');if(!sub)return;
   const lbl=document.getElementById('shabbatPillLbl');if(lbl)lbl.textContent='שבתות אצל '+_shbHostName();
   const fams=_shbFams(_shbKey(_shbThis()));
-  sub.textContent=fams.length?'השבת: '+fams.map(_shbShort).join(', '):'השבת: עוד לא נרשם מי מגיע';
+  const p=_shbParsha(_shbThis()),when=p?_shbTitle(_shbThis()):'השבת';
+  sub.textContent=when+': '+(fams.length?fams.map(_shbShort).join(', '):'עוד לא נרשם מי מגיע');
 }
 let _shbOpen=false,_shbShowPast=8,_shbTab='list';
 function _shbEnsureModal(){
@@ -6440,8 +6454,8 @@ function _shbRow(d,label){
     return`<button type="button" onclick="toggleShabbatFam('${key}',${f.id})" aria-pressed="${sel}" style="padding:5px 11px;border-radius:16px;border:1.5px solid ${sel?'var(--blue-mid)':'var(--border)'};background:${sel?'var(--blue-mid)':'transparent'};color:${sel?'#fff':'var(--text2)'};font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">${sel?'✓ ':''}${esc(_shbShort(f))}</button>`;}).join('');
   return`<div style="border:1.5px solid ${label?'var(--blue-mid)':'var(--border)'};border-radius:var(--r2);padding:10px 12px;margin-bottom:8px;background:var(--surface)">
     <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
-      <span style="font-size:14px;font-weight:800;color:var(--text)">שבת ${esc(_shbHeb(d))}</span>
-      <span style="font-size:11px;color:var(--text3)">${_shbLat(d)}</span>
+      <span style="font-size:14px;font-weight:800;color:var(--text)">${esc(_shbTitle(d))}</span>
+      <span style="font-size:11px;color:var(--text3)">${esc(_shbHeb(d))} · ${_shbLat(d)}</span>
       ${label?`<span style="font-size:11px;font-weight:700;color:var(--blue-mid)">${label}</span>`:''}
       <span style="flex:1"></span>
       <span style="font-size:11px;font-weight:700;color:var(--text2)">${on.size?on.size+' משפחות':''}</span>
