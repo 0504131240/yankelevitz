@@ -36,8 +36,12 @@ let yahrzeits=[];
 let familyTree=[];
 // Family-tree filling competition: {email:{name,points}} — see _awardTreePoints().
 let treeScores={};
-// Who was at the parents' for each Shabbat: {'YYYY-MM-DD' (the Saturday): {fams:[famId], note}}
+// Who was at the parents' for each Shabbat: {'YYYY-MM-DD' (the Saturday): {fams:[famId], note}}.
+// Lives in its own document (appData/shabbat), written one Shabbat at a time
+// with arrayUnion/arrayRemove — never as part of save()'s whole-document
+// write, so a device with an old copy open can't wipe out other people's marks.
 let shabbatVisits={};
+let _legacyShb=null;
 let nxtMsg=1,nxtCal=1,nxtBday=1,nxtClaim=1,nxtNotif=1,nxtPoll=1,nxtCountdown=1,nxtYahrzeit=1,nxtTreePerson=1;
 let currentShell='home';
 let calYear=new Date().getFullYear(),calMonth=new Date().getMonth(),calSelDay=null,calHebrew=true;
@@ -265,7 +269,7 @@ async function fbInit(){
   _fbApp=appMod.initializeApp(firebaseConfig);
   const db=fsMod.getFirestore(_fbApp);
   _fb={db,doc:fsMod.doc,getDoc:fsMod.getDoc,setDoc:fsMod.setDoc,onSnapshot:fsMod.onSnapshot,collection:fsMod.collection,
-    getDocs:fsMod.getDocs,query:fsMod.query,where:fsMod.where,deleteDoc:fsMod.deleteDoc};
+    getDocs:fsMod.getDocs,query:fsMod.query,where:fsMod.where,deleteDoc:fsMod.deleteDoc,arrayUnion:fsMod.arrayUnion,arrayRemove:fsMod.arrayRemove};
   return _fb;
 }
 
@@ -299,7 +303,7 @@ function closeSettingsHubModal(){
 // notifications' 200-entry cap) only ever grows, so this is worth being
 // able to check at a glance instead of guessing why saves keep failing.
 function _dataSizeBytes(){
-  const payload={families,events,fund,goalFunds,savingsPot,adminPass,messages,calItems,birthdays,paymentClaims,globalSettled,visits,notifications,polls,countdowns,yahrzeits,familyTree,treeScores,shabbatVisits};
+  const payload={families,events,fund,goalFunds,savingsPot,adminPass,messages,calItems,birthdays,paymentClaims,globalSettled,visits,notifications,polls,countdowns,yahrzeits,familyTree,treeScores};
   return new Blob([JSON.stringify(payload)]).size;
 }
 function renderDataSizeCheck(){
@@ -962,7 +966,7 @@ let _retryTimer=null;
 // doesn't blindly re-push a stale in-memory `families` and wipe out a
 // change someone else already saved to it — see save()'s own staleness
 // check for when this actually gets used.
-const _SYNC_FIELDS=['families','events','fund','goalFunds','savingsPot','messages','calItems','birthdays','paymentClaims','globalSettled','visits','notifications','polls','countdowns','yahrzeits','familyTree','treeScores','shabbatVisits','adminPass'];
+const _SYNC_FIELDS=['families','events','fund','goalFunds','savingsPot','messages','calItems','birthdays','paymentClaims','globalSettled','visits','notifications','polls','countdowns','yahrzeits','familyTree','treeScores','adminPass'];
 function _getSyncFieldValue(f){
   switch(f){
     case'families':return families;case'events':return events;case'fund':return fund;
@@ -970,7 +974,7 @@ function _getSyncFieldValue(f){
     case'calItems':return calItems;case'birthdays':return birthdays;case'paymentClaims':return paymentClaims;
     case'globalSettled':return globalSettled;case'visits':return visits;case'notifications':return notifications;
     case'polls':return polls;case'countdowns':return countdowns;case'yahrzeits':return yahrzeits;
-    case'familyTree':return familyTree;case'treeScores':return treeScores;case'shabbatVisits':return shabbatVisits;case'adminPass':return adminPass;
+    case'familyTree':return familyTree;case'treeScores':return treeScores;case'adminPass':return adminPass;
   }
 }
 function _setSyncFieldValue(f,v){
@@ -980,7 +984,7 @@ function _setSyncFieldValue(f,v){
     case'calItems':calItems=v;break;case'birthdays':birthdays=v;break;case'paymentClaims':paymentClaims=v;break;
     case'globalSettled':globalSettled=v;break;case'visits':visits=v;break;case'notifications':notifications=v;break;
     case'polls':polls=v;break;case'countdowns':countdowns=v;break;case'yahrzeits':yahrzeits=v;break;
-    case'familyTree':familyTree=v;break;case'treeScores':treeScores=v;break;case'shabbatVisits':shabbatVisits=v;break;case'adminPass':adminPass=v;break;
+    case'familyTree':familyTree=v;break;case'treeScores':treeScores=v;break;case'adminPass':adminPass=v;break;
   }
 }
 // A snapshot of every synced field exactly as it stood the last time this
@@ -1036,7 +1040,7 @@ async function save(){
         }
       }catch(e){console.warn('pre-save freshness check failed, saving local state as-is:',e);}
     }
-    await setDoc(doc(db,'appData','familyPayments'),{families,events,fund,goalFunds,savingsPot,adminPass,messages,calItems,birthdays,paymentClaims,globalSettled,visits,notifications,polls,countdowns,yahrzeits,familyTree,treeScores,shabbatVisits});
+    await setDoc(doc(db,'appData','familyPayments'),{families,events,fund,goalFunds,savingsPot,adminPass,messages,calItems,birthdays,paymentClaims,globalSettled,visits,notifications,polls,countdowns,yahrzeits,familyTree,treeScores});
     _captureSyncBaseline();
     localStorage.removeItem('pendingSave');
     localStorage.removeItem('pendingSaveAt');
@@ -1087,7 +1091,8 @@ async function load(){
     yahrzeits=d.yahrzeits||[];
     familyTree=d.familyTree||[];
     treeScores=d.treeScores||{};
-    shabbatVisits=d.shabbatVisits||{};
+    // Marks saved before the move to appData/shabbat — copied over once.
+    if(d.shabbatVisits&&Object.keys(d.shabbatVisits).length)_legacyShb=d.shabbatVisits;
     nxtMsg=messages.length?Math.max(...messages.map(m=>m.id))+1:1;
     nxtCal=calItems.length?Math.max(...calItems.map(c=>c.id))+1:1;
     nxtBday=birthdays.length?Math.max(...birthdays.map(b=>b.id))+1:1;
@@ -3763,7 +3768,6 @@ async function startRealtimeSync(){
         changed=_adoptIfChanged(d.familyTree||[],()=>familyTree,v=>familyTree=v,
           ()=>{nxtTreePerson=familyTree.length?Math.max(...familyTree.map(p=>p.id))+1:1;})||changed;
         changed=_adoptIfChanged(d.treeScores||{},()=>treeScores,v=>treeScores=v)||changed;
-        changed=_adoptIfChanged(d.shabbatVisits||{},()=>shabbatVisits,v=>shabbatVisits=v)||changed;
         if((d.adminPass||'')!==adminPass){adminPass=d.adminPass||'';}
         // Whatever we just adopted (or already matched) now matches
         // Firestore as far as this device knows — refresh the baseline
@@ -6443,20 +6447,52 @@ function openShabbatModal(){_shbOpen=true;_shbShowPast=8;_shbTab='list';_shbEnsu
 function closeShabbatModal(){_shbOpen=false;const m=document.getElementById('shabbatModal');if(m)m.style.display='none';}
 function setShabbatTab(t){_shbTab=t;renderShabbatIfOpen();}
 function shabbatMorePast(){_shbShowPast+=12;renderShabbatIfOpen();}
-function toggleShabbatFam(key,fid){
+let _shbUnsub=null;
+async function startShabbatSync(){
+  if(_shbUnsub)return;
+  try{
+    const {db,doc,onSnapshot}=await fbInit();
+    _shbUnsub=onSnapshot(doc(db,'appData','shabbat'),snap=>{
+      const d=snap.exists()?snap.data():{};
+      if(!d.migrated&&_legacyShb){_shbMigrate(_legacyShb);_legacyShb=null;}
+      shabbatVisits=d.visits||{};
+      try{localStorage.setItem('shabbatVisits',JSON.stringify(shabbatVisits));}catch(e){}
+      renderShabbatPill();renderShabbatIfOpen();
+    },err=>console.warn('shabbat sync:',err));
+  }catch(e){console.warn('shabbat sync:',e);}
+}
+async function _shbMigrate(old){
+  try{
+    const {db,doc,setDoc,arrayUnion}=await fbInit();
+    const visits={};
+    Object.entries(old).forEach(([k,e])=>{const v={};if((e.fams||[]).length)v.fams=arrayUnion(...e.fams);if(e.note)v.note=e.note;if(Object.keys(v).length)visits[k]=v;});
+    await setDoc(doc(db,'appData','shabbat'),{visits,migrated:true},{merge:true});
+  }catch(e){console.warn('shabbat migrate:',e);}
+}
+// One Shabbat's change, merged into appData/shabbat — touches nothing else.
+async function _shbWrite(key,patch){
+  try{
+    const {db,doc,setDoc}=await fbInit();
+    await setDoc(doc(db,'appData','shabbat'),{visits:{[key]:patch}},{merge:true});
+  }catch(e){console.warn('shabbat save:',e);showToast('⚠️ השמירה נכשלה — בדקו את החיבור ונסו שוב',4000);}
+}
+async function toggleShabbatFam(key,fid){
   const e=shabbatVisits[key]||{fams:[]};
   const has=(e.fams||[]).includes(fid);
   e.fams=has?e.fams.filter(x=>x!==fid):(e.fams||[]).concat(fid);
-  if(!e.fams.length&&!e.note)delete shabbatVisits[key];else shabbatVisits[key]=e;
-  save();renderShabbatPill();renderShabbatIfOpen();
+  shabbatVisits[key]=e;
+  renderShabbatPill();renderShabbatIfOpen();
+  const {arrayUnion,arrayRemove}=await fbInit();
+  _shbWrite(key,{fams:has?arrayRemove(fid):arrayUnion(fid)});
 }
 function editShabbatNote(key){
   const cur=(shabbatVisits[key]||{}).note||'';
   const v=prompt('הערה לשבת הזו (למשל: מי מביא מה, אורחים)',cur);
   if(v===null)return;
   const e=shabbatVisits[key]||{fams:[]};e.note=v.trim().slice(0,200);
-  if(!(e.fams||[]).length&&!e.note)delete shabbatVisits[key];else shabbatVisits[key]=e;
-  save();renderShabbatIfOpen();
+  shabbatVisits[key]=e;
+  renderShabbatIfOpen();
+  _shbWrite(key,{note:e.note});
 }
 function _shbRow(d,label){
   const key=_shbKey(d),e=shabbatVisits[key]||{},on=new Set(e.fams||[]);
@@ -10589,7 +10625,7 @@ async function _updateCustomTotal(){
 }
 
 applyEditMode();
-load().then(async()=>{await autoUnlockAdmin();if(window.location.hash)handleHash();startRealtimeSync();startFormImportSync();renderNotifBtn();if(_notifOk()){registerFCMToken();}});
+load().then(async()=>{await autoUnlockAdmin();if(window.location.hash)handleHash();startRealtimeSync();startShabbatSync();startFormImportSync();renderNotifBtn();if(_notifOk()){registerFCMToken();}});
 loadEjsSettings();
 loadPaymentSettings();
 window.addEventListener('hashchange',handleHash);

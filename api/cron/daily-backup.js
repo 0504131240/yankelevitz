@@ -161,7 +161,9 @@ module.exports = async (req, res) => {
   const data = snap.data();
 
   const today = new Date().toISOString().slice(0, 10);
-  await db.doc(`backups/${today}`).set({ data, backedUpAt: new Date().toISOString() });
+  // The Shabbat log lives in its own doc (appData/shabbat) — back it up too.
+  const shb = await db.doc('appData/shabbat').get();
+  await db.doc(`backups/${today}`).set({ data, shabbat: shb.exists ? shb.data() : null, backedUpAt: new Date().toISOString() });
 
   const cutoff = new Date(Date.now() - BACKUP_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const old = await db.collection('backups').where('__name__', '<', db.doc(`backups/${cutoff}`)).get();
