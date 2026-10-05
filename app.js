@@ -5456,7 +5456,10 @@ function releasePotManual(evId,creditorFid,amt,toFund){
   Object.entries(potByFam).forEach(([fidStr,avail])=>{
     if(rem<=0.5)return;
     const fid=parseInt(fidStr);
-    const take=Math.min(avail,rem);
+    // Whole shekels only: a deposit like ₪268.5 (a wallet balance taken
+    // as-is) must not round to 269 in the record while only 268.5 leaves
+    // the pot — that put one extra shekel on the creditor's side.
+    const take=Math.min(Math.round(avail),rem);
     if(take<=0.5)return;
     const fromFam=getFam(fid);if(!fromFam)return;
     ev.settled.push({from:fromFam.name.replace('משפחת','').trim(),fromFid:fid,to:credName,toFid:creditorFid,amt:Math.round(take),method:'pot'});
