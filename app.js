@@ -1173,8 +1173,10 @@ async function load(){
         openEmailGateModal();
       } else {
         const savedFam=getFam(parseInt(savedFamId));
-        if(savedFam) showEmailGateWelcome(savedFam,parseInt(localStorage.getItem('deviceEmailSlot3')||'1'));
-        else openEmailGateModal();
+        // The welcome card shows once per visit — not again on every refresh.
+        let _welcomed=false;try{_welcomed=sessionStorage.getItem('welcomed')==='1';}catch(e){}
+        if(!savedFam) openEmailGateModal();
+        else if(!_welcomed) showEmailGateWelcome(savedFam,parseInt(localStorage.getItem('deviceEmailSlot3')||'1'));
       }
     }
   }
@@ -1238,13 +1240,17 @@ function renderOpenList(){
   const open=events.filter(e=>e.open);
   document.getElementById('openList').innerHTML=open.length?open.map(evCard).join(''):`<div class="empty"><span class="empty-ico">📅</span>אין אירועים פעילים</div>`;
 }
+// The address bar remembers where you are (#pay, #events, #recipes, #shabbat…)
+// so a refresh lands back on the same screen — see handleHash.
+function _setHash(h){history.replaceState(null,'',h?'#'+h:location.pathname+location.search);}
+function _clearHash(h){if(location.hash==='#'+h)_setHash('');}
 function switchShell(s){
   currentShell=s;
   closeChatSheet();
   document.body.classList.toggle('at-home',s==='home');
   document.getElementById('mn-home').classList.toggle('mn-active',s==='home');
   document.getElementById('mn-pay').classList.toggle('mn-active',s==='pay');
-  if(s==='home'){renderFamilyHome();setTimeout(()=>{const sh=document.getElementById('shell-home');if(sh)sh.scrollTop=0;},10);}
+  if(s==='home'){_setHash('');renderFamilyHome();setTimeout(()=>{const sh=document.getElementById('shell-home');if(sh)sh.scrollTop=0;},10);}
   if(s==='pay')goTab('home',document.getElementById('nb-home'));
 }
 function openFamiliesFromHome(){
@@ -1694,7 +1700,7 @@ function _treeFindOrCreateFamilyRoot(){
 }
 function openFamilyTreeOverlay(){
   seedFamilyTreeIfEmpty();
-  document.getElementById('familyTreeOverlay').style.display='flex';
+  document.getElementById('familyTreeOverlay').style.display='flex';_setHash('tree');
   // Always open in normal (non-stats) mode with a clean selection.
   _treeStatsMode=false;_treeSel.clear();_treeInfoId=null;
   const _ip=document.getElementById('treeInfoPanel');if(_ip)_ip.style.display='none';
@@ -1706,7 +1712,7 @@ function openFamilyTreeOverlay(){
   _fitTreeWhenReady(); // canvas needs a layout pass first for its size to be known
 }
 function closeFamilyTreeOverlay(){
-  document.getElementById('familyTreeOverlay').style.display='none';
+  document.getElementById('familyTreeOverlay').style.display='none';_clearHash('tree');
 }
 function renderFamilyTreeIfOpen(){
   const overlay=document.getElementById('familyTreeOverlay');
@@ -3125,7 +3131,7 @@ function deleteCountdown(id){
 function openChatSheet(){
   const s=document.getElementById('chatSheet');
   if(!s)return;
-  s.classList.add('open');
+  s.classList.add('open');_setHash('chat');
   const ml=document.getElementById('msgList');
   if(ml)setTimeout(()=>ml.scrollTop=ml.scrollHeight,50);
   localStorage.setItem('chatLastSeen',String(Date.now()));
@@ -3134,6 +3140,7 @@ function openChatSheet(){
 function closeChatSheet(){
   const s=document.getElementById('chatSheet');
   if(s)s.classList.remove('open');
+  _clearHash('chat');
   localStorage.setItem('chatLastSeen',String(Date.now()));
   renderChatBadge();
 }
@@ -6443,8 +6450,8 @@ function _shbEnsureModal(){
   </div>`;
   document.body.appendChild(m);return m;
 }
-function openShabbatModal(){_shbOpen=true;_shbShowPast=8;_shbTab='list';_shbEnsureModal().style.display='flex';renderShabbatIfOpen();}
-function closeShabbatModal(){_shbOpen=false;const m=document.getElementById('shabbatModal');if(m)m.style.display='none';}
+function openShabbatModal(){_setHash('shabbat');_shbOpen=true;_shbShowPast=8;_shbTab='list';_shbEnsureModal().style.display='flex';renderShabbatIfOpen();}
+function closeShabbatModal(){_clearHash('shabbat');_shbOpen=false;const m=document.getElementById('shabbatModal');if(m)m.style.display='none';}
 function setShabbatTab(t){_shbTab=t;renderShabbatIfOpen();}
 function shabbatMorePast(){_shbShowPast+=12;renderShabbatIfOpen();}
 let _shbUnsub=null;
@@ -7509,7 +7516,7 @@ function goTab(tab,el,skipHash,swipeDir){
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   if(el)el.classList.add('active');
   if(tab==='families'){loadEjsSettings();loadPaymentSettings();}
-  if(!skipHash) history.replaceState(null,'','#'+tab);
+  if(!skipHash) history.replaceState(null,'','#'+(tab==='home'?'pay':tab));
   if(!swipeDir||!prev||prev===next){next.classList.add('active');return;}
   const DUR=260,EASE='cubic-bezier(0.4,0,0.2,1)';
   const right=swipeDir==='right'; // finger went right → new view from left
@@ -7536,6 +7543,12 @@ function _enterPayShell(){
 function handleHash(){
   const h=(window.location.hash||'').replace('#','');
   if(!h||h==='home'){goTab('home',document.getElementById('nb-home'),true);return;}
+  if(h==='pay'){switchShell('pay');return;}
+  if(h==='archive'){_enterPayShell();goTab('archive',null,true);return;}
+  if(h==='recipes'){if(window.openRecipesOverlay)openRecipesOverlay();return;}
+  if(h==='tree'){openFamilyTreeOverlay();return;}
+  if(h==='chat'){openChatSheet();return;}
+  if(h==='shabbat'){openShabbatModal();return;}
   if(h==='fund'){_enterPayShell();openFundDetail();return;}
   const tabMap={events:'nb-events',families:'nb-families'};
   if(tabMap[h]){_enterPayShell();goTab(h,document.getElementById(tabMap[h]),true);return;}
@@ -7846,6 +7859,7 @@ function closeNotifCenter(){
   const modal=document.getElementById('notifCenterModal');if(modal)modal.style.display='none';
 }
 function showEmailGateWelcome(fam,slot){
+  try{sessionStorage.setItem('welcomed','1');}catch(e){}
   const el=document.getElementById('emailGateContent');const modal=document.getElementById('emailGateModal');
   if(!el)return;
   if(modal){ modal.style.display='flex'; modal.onclick=e=>{if(e.target===modal)closeEmailGateModal();}; }

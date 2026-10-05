@@ -318,6 +318,7 @@ window.openRecipesOverlay=function(){
   build();
   $('recipesOverlay').classList.add('open');
   document.body.style.overflow='hidden';
+  history.replaceState(null,'','#recipes'); // a refresh reopens the recipes
   updateShopBadge();
   checkScan();
   if(!S.store){
@@ -337,6 +338,7 @@ window.closeRecipesOverlay=function(){
   if($('rcPage').classList.contains('open')){rcClosePage();return;}
   o.classList.remove('open');
   document.body.style.overflow='';
+  if(location.hash==='#recipes')history.replaceState(null,'',location.pathname+location.search);
 };
 
 // ── list page ──────────────────────────────────────────────────────────────
