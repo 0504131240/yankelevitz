@@ -3430,6 +3430,7 @@ function openNotifPrefFor(famId,slot,tab){
   openNotifPrefModal();
 }
 function renderNotifPrefModal(){
+  if(_npAs&&_npAs.inline){renderNotifDevicesModal(true);return;}
   const el=document.getElementById('notifPrefModalContent');if(!el)return;
   const f=_npFam(),slot=_npSlot();
   const emailPref=(f&&slot)?f.notifEmailPref?.[slot]:null;
@@ -3626,19 +3627,36 @@ async function openNotifDevicesModal(){
 }
 function closeNotifDevicesModal(){
   document.getElementById('notifDevicesModal').style.display='none';
+  _regEditClose();
 }
 // Three tabs — who gets push (registered devices), email (opted-in
 // addresses) and spoken calls (parents' kosher phones).
 let _notifRegTab='push';
-function setNotifRegTab(t){_notifRegTab=t;renderNotifDevicesModal();}
-async function renderNotifDevicesModal(){
+function setNotifRegTab(t){_notifRegTab=t;_regEditClose();renderNotifDevicesModal(t!=='push');}
+// Admin edits a parent's email/phone choices right here: tapping a row opens
+// the same controls as the 🔔 window, aimed at that parent (_npAs.inline —
+// see renderNotifPrefModal, which re-renders this list instead).
+let _regEditKey=null,_regDevRows=null;
+function _regEditClose(){_regEditKey=null;if(_npAs&&_npAs.inline)_npAs=null;}
+function toggleRegEdit(tab,famId,slot){
+  const k=tab+':'+famId+':'+slot;
+  if(_regEditKey===k)_regEditClose();
+  else{_regEditKey=k;_npAs={famId,slot,inline:true};}
+  renderNotifDevicesModal(true);
+}
+const _regEditBtn=(tab,f,slot,open)=>`<button type="button" onclick="toggleRegEdit('${tab}',${f.id},${slot})" style="margin-top:6px;padding:4px 12px;border-radius:14px;border:1.5px solid ${open?'var(--blue-mid)':'var(--border)'};background:${open?'var(--blue-mid)':'transparent'};color:${open?'#fff':'var(--blue-mid)'};font-size:11px;font-weight:700;font-family:var(--font);cursor:pointer">${open?'✓ סיום':'✏️ שינוי'}</button>`;
+async function renderNotifDevicesModal(useCache){
   const el=document.getElementById('notifDevicesModalContent');if(!el)return;
   try{
-    const {db,collection,getDocs}=await fbInit();
-    const snap=await getDocs(collection(db,'fcmTokens'));
-    const rows=[];
-    snap.forEach(d=>rows.push({id:d.id,...d.data()}));
-    rows.sort((a,b)=>(b.ts||0)-(a.ts||0));
+    let rows=useCache&&_regDevRows;
+    if(!rows){
+      const {db,collection,getDocs}=await fbInit();
+      const snap=await getDocs(collection(db,'fcmTokens'));
+      rows=[];
+      snap.forEach(d=>rows.push({id:d.id,...d.data()}));
+      rows.sort((a,b)=>(b.ts||0)-(a.ts||0));
+      _regDevRows=rows;
+    }
     // Two docs sharing the exact same push token are a genuine duplicate —
     // the same device registered twice under different device ids. But a
     // browser tab and an installed PWA on the same physical phone get two
@@ -3671,12 +3689,22 @@ async function renderNotifDevicesModal(){
         <button onclick="deleteNotifDevice('${r.id}')" style="background:none;border:none;color:var(--red-mid);cursor:pointer;font-size:16px;padding:4px;flex-shrink:0" title="מחק רישום">🗑</button>
       </div>`;
     }).join(''):'<div class="empty" style="padding:20px 0"><span class="empty-ico">📱</span>אין מכשירים רשומים לפוש</div>';
+    // Every parent with an email address — registered ones first — so the
+    // admin can also turn email on for someone who never did.
     const emailRows=[];
-    families.forEach(f=>{
-      if(!f.notifEmailPref)return;
-      [1,2].forEach(slot=>{ const pref=f.notifEmailPref[slot];if(pref)emailRows.push({f,slot,pref}); });
-    });
+    families.forEach(f=>[1,2].forEach(slot=>{
+      const pref=f.notifEmailPref?.[slot]||null;
+      if(pref||(slot===2?f.email2:f.email))emailRows.push({f,slot,pref});
+    }));
+    emailRows.sort((a,b)=>(b.pref?1:0)-(a.pref?1:0));
+    const emailRegCount=emailRows.filter(r=>r.pref).length;
     const emailHtml=emailRows.length?emailRows.map(({f,slot,pref})=>{
+      const open=_regEditKey==='email:'+f.id+':'+slot;
+      if(!pref)return`<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:700;color:var(--text2)">${esc(_regDisplayName(f,slot))} <span style="font-size:10px;background:var(--surface2);padding:1px 7px;border-radius:10px">לא רשום</span></div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">${esc((slot===2?f.email2:f.email)||'')}</div>
+        ${_regEditBtn('email',f,slot,open)}${open?`<div class="np-pane" style="margin-top:10px">${_npEmailPane(f,slot)}</div>`:''}
+      </div>`;
       const who=_regDisplayName(f,slot);
       const email=(slot===2?f.email2:f.email)||'אין כתובת מייל';
       const catLabels=NOTIF_EMAIL_CATS.filter(c=>_notifEmailCatOn(pref,c.id)).map(c=>{
@@ -3687,12 +3715,13 @@ async function renderNotifDevicesModal(){
         <div style="font-size:13px;font-weight:700">${esc(who)}${pref.push!==true?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔕 רק מייל</span>':''}</div>
         <div style="font-size:11px;color:var(--text2);margin-top:2px">${esc(email)}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">${catLabels.length?esc(catLabels.join(' · ')):'לא סימנו אף קטגוריה'}</div>
-        <button type="button" onclick="closeNotifDevicesModal();openNotifPrefFor(${f.id},${slot},'email')" style="margin-top:6px;padding:4px 12px;border-radius:14px;border:1.5px solid var(--border);background:transparent;color:var(--blue-mid);font-size:11px;font-weight:700;font-family:var(--font);cursor:pointer">✏️ שינוי ההגדרות</button>
+        ${_regEditBtn('email',f,slot,open)}${open?`<div class="np-pane" style="margin-top:10px">${_npEmailPane(f,slot)}</div>`:''}
       </div>`;
     }).join(''):'<div class="empty" style="padding:20px 0"><span class="empty-ico">📧</span>אף אחד לא רשום להתראות במייל</div>';
     const phoneRows=[];
     families.forEach(f=>[1,2].forEach(slot=>{ const p=_parentPhone(f,slot);if(p&&p.phone)phoneRows.push({f,slot,p}); }));
     const phoneHtml=phoneRows.length?phoneRows.map(({f,slot,p})=>{
+      const open=_regEditKey==='phone:'+f.id+':'+slot;
       const cats=p.cats||{};
       // Same rule as the server (api/_lib/yemot.js): only explicitly checked kinds call.
       const chosen=PHONE_CATS.filter(c=>cats[c.id]).map(c=>c.ico+' '+c.label);
@@ -3700,10 +3729,10 @@ async function renderNotifDevicesModal(){
         <div style="font-size:13px;font-weight:700">${esc(_regDisplayName(f,slot))}${p.off?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔕 כבוי</span>':''}${!p.off&&p.mode==='tzintuk'?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔔 צינתוק</span>':''}</div>
         <div style="font-size:11px;color:var(--text2);margin-top:2px;direction:ltr;text-align:right">📞 ${esc(p.phone)}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">${chosen.length?esc(chosen.join(' · ')):'לא סימנו אף התראה'}</div>
-        <button type="button" onclick="closeNotifDevicesModal();openNotifPrefFor(${f.id},${slot},'phone')" style="margin-top:6px;padding:4px 12px;border-radius:14px;border:1.5px solid var(--border);background:transparent;color:var(--blue-mid);font-size:11px;font-weight:700;font-family:var(--font);cursor:pointer">✏️ שינוי ההגדרות</button>
+        ${_regEditBtn('phone',f,slot,open)}${open?`<div class="np-pane" style="margin-top:10px">${_npPhonePane(f,[{slot,p}])}</div>`:''}
       </div>`;
     }).join(''):'<div class="empty" style="padding:20px 0"><span class="empty-ico">📞</span>אף אחד לא רשום לשיחות לטלפון כשר</div>';
-    const tabs=[['push','🔔 פוש',rows.length],['email','📧 מייל',emailRows.length],['phone','📞 שיחה',phoneRows.length]];
+    const tabs=[['push','🔔 פוש',rows.length],['email','📧 מייל',emailRegCount],['phone','📞 שיחה',phoneRows.length]];
     const tabsHtml=`<div style="display:flex;gap:6px;margin-bottom:12px">${tabs.map(([id,label,n])=>{
       const on=_notifRegTab===id;
       return`<button type="button" onclick="setNotifRegTab('${id}')" style="flex:1;padding:8px 4px;border-radius:20px;border:1.5px solid ${on?'var(--blue-mid)':'var(--border)'};background:${on?'var(--blue-mid)':'transparent'};color:${on?'#fff':'var(--text2)'};font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer">${label} <span style="opacity:.8">(${n})</span></button>`;
@@ -5935,7 +5964,6 @@ function _renderPersonPhoneSection(f,slot){
     <input type="tel" id="personKosherPhone" inputmode="tel" autocomplete="tel" placeholder="מספר טלפון, למשל 0527123456" value="${esc(cur?.phone||'')}"
       style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 12px;font-size:14px;font-family:var(--font);background:var(--bg);color:var(--text);box-sizing:border-box;direction:ltr;text-align:right">
     <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.5">מה יגיע בשיחה בוחרים בכפתור ההתראות 🔔 למעלה.</div>
-    ${editMode?`<button type="button" onclick="openNotifPrefFor(${f.id},${slot},'phone')" style="margin-top:8px;padding:6px 12px;border-radius:14px;border:1.5px solid var(--border);background:transparent;color:var(--blue-mid);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">🔔 הגדרות ההתראות של ההורה (מייל ופלאפון)</button>`:''}
     ${editMode?`<button type="button" onclick="testKosherPhoneCall('tzintuk')" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">🔔 צינתוק בדיקה</button><div id="personPhoneTestStatus" style="font-size:12px;margin-top:6px"></div>`:''}`;
 }
 async function testKosherPhoneCall(mode){
