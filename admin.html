@@ -1424,6 +1424,16 @@
     </div>
 
   <!-- Person modal (parent or kid) -->
+<div id="notifPrefModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1700;align-items:center;justify-content:center;padding:20px;box-sizing:border-box" onclick="if(event.target===this)closeNotifPrefModal()">
+  <div style="background:var(--surface);border-radius:var(--r);border:1px solid var(--border);padding:0;width:100%;max-width:400px;max-height:85vh;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:16px 18px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:15px;font-weight:800;color:var(--text)">🔔 הרשמה להתראות</span>
+      <button onclick="closeNotifPrefModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text2);line-height:1;padding:0">✕</button>
+    </div>
+    <div style="padding:14px 18px;overflow-y:auto;flex:1;min-height:0" id="notifPrefModalContent"></div>
+  </div>
+</div>
+
   <div id="personModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1300;align-items:center;justify-content:center;padding:20px;box-sizing:border-box" onclick="if(event.target===this)closePersonModal()">
     <div style="background:var(--surface);border-radius:var(--r);padding:20px;width:100%;max-width:340px;box-sizing:border-box">
       <div style="font-size:15px;font-weight:700;margin-bottom:16px" id="personModalTitle">👶 הוסף ילד</div>

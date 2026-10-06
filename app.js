@@ -3415,20 +3415,33 @@ function openNotifPrefModal(){
 }
 function closeNotifPrefModal(){
   const modal=document.getElementById('notifPrefModal');if(modal)modal.style.display='none';
+  _npAs=null;
 }
 function setNpTab(t){_npTab=t;renderNotifPrefModal();}
 function _myFam(){const fid=_myFamId();return fid!=null?getFam(fid):null;}
+// The 🔔 window normally edits this device's own family/parent. The admin can
+// open it for any parent (openNotifPrefFor) — then _npAs says whose settings
+// the email and phone tabs change. Push is per device, so it stays out of that.
+let _npAs=null;
+function _npFam(){return _npAs?getFam(_npAs.famId):_myFam();}
+function _npSlot(){return _npAs?_npAs.slot:_myEmailSlot();}
+function openNotifPrefFor(famId,slot,tab){
+  _npAs={famId,slot};_npTab=tab||'phone';
+  openNotifPrefModal();
+}
 function renderNotifPrefModal(){
   const el=document.getElementById('notifPrefModalContent');if(!el)return;
-  const f=_myFam(),slot=_myEmailSlot();
+  const f=_npFam(),slot=_npSlot();
   const emailPref=(f&&slot)?f.notifEmailPref?.[slot]:null;
-  const phones=f?[1,2].map(sl=>({slot:sl,p:_parentPhone(f,sl)})).filter(x=>x.p&&x.p.phone):[];
+  const phones=f?[1,2].filter(sl=>!_npAs||sl===_npAs.slot).map(sl=>({slot:sl,p:_parentPhone(f,sl)})).filter(x=>x.p&&x.p.phone):[];
+  if(_npAs&&_npTab==='push')_npTab='phone';
   const pushStatus=_notifOk()?PUSH_CATS.filter(c=>_pushPrefs().cats[c.id]).length+' נבחרו':'כבוי';
   const emailStatus=emailPref?NOTIF_EMAIL_CATS.filter(c=>_notifEmailCatOn(emailPref,c.id)).length+' נבחרו':'כבוי';
   const phonesOn=phones.filter(x=>!x.p.off).length;
   const phoneStatus=!phones.length?'אין מספר':!phonesOn?'כבוי':phonesOn===1?'פעיל':phonesOn+' פעילים';
-  const tabs=[['push','📱','פוש',pushStatus],['email','📧','מייל',emailStatus],['phone','📞','פלאפון',phoneStatus]];
-  el.innerHTML=`<div class="np-tabs" role="tablist">${tabs.map(([id,ico,label,st])=>`<button type="button" role="tab" aria-selected="${_npTab===id}" class="np-tab${_npTab===id?' on':''}" onclick="setNpTab('${id}')"><span class="np-tab-ico">${ico}</span><span class="np-tab-l">${label}</span><span class="np-tab-s">${st}</span></button>`).join('')}</div>
+  const tabs=[...(_npAs?[]:[['push','📱','פוש',pushStatus]]),['email','📧','מייל',emailStatus],['phone','📞','פלאפון',phoneStatus]];
+  const asHdr=_npAs&&f?`<div class="np-note" style="margin-bottom:12px">✏️ עריכה כמנהל: ההגדרות של <b>${esc(_regDisplayName(f,slot))}</b>. פוש נקבע בכל מכשיר בנפרד, ולכן לא מופיע כאן.</div>`:'';
+  el.innerHTML=asHdr+`<div class="np-tabs" role="tablist">${tabs.map(([id,ico,label,st])=>`<button type="button" role="tab" aria-selected="${_npTab===id}" class="np-tab${_npTab===id?' on':''}" onclick="setNpTab('${id}')"><span class="np-tab-ico">${ico}</span><span class="np-tab-l">${label}</span><span class="np-tab-s">${st}</span></button>`).join('')}</div>
     <div class="np-pane">${_npTab==='email'?_npEmailPane(f,slot):_npTab==='phone'?_npPhonePane(f,phones):_npPushPane(f,slot,emailPref)}</div>`;
 }
 function _npPushPane(f,slot,emailPref){
@@ -3469,13 +3482,13 @@ function _npPhonePane(f,phones){
       +(p.off?'':`<div class="np-scope" style="margin:2px 0 6px">איך:
           <span class="np-seg" role="group"><button type="button" class="${p.mode!=='tzintuk'?'on':''}" onclick="setPhoneMode(${slot},'call')">שיחה מוקראת</button><button type="button" class="${p.mode==='tzintuk'?'on':''}" onclick="setPhoneMode(${slot},'tzintuk')">צינתוק</button></span></div>
         <div class="np-foot" style="margin:0 0 4px">${p.mode==='tzintuk'?'צלצול קצר מ־0772248443. כדי לשמוע מה חדש מתקשרים בחזרה למספר.':'שיחה שמקריאה את העדכון.'}</div>
-        ${p.testedTz?'':`<button type="button" onclick="sendMyTestTzintuk(${slot})" style="margin:2px 0 6px;padding:7px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">🔔 שלחו לי צינתוק בדיקה</button><div id="npTzStatus${slot}" class="np-foot" style="margin:0 0 4px"></div>`}
+        ${p.testedTz?'':`<button type="button" onclick="sendMyTestTzintuk(${slot})" style="margin:2px 0 6px;padding:7px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">🔔 ${_npAs?'שליחת צינתוק בדיקה':'שלחו לי צינתוק בדיקה'}</button><div id="npTzStatus${slot}" class="np-foot" style="margin:0 0 4px"></div>`}
         <div class="np-sep"></div><div class="np-hint">על מה</div>`+_npCatList(PHONE_CATS,c=>!!cats[c.id],c=>scopes[c.id],'togglePhoneCat','setPhoneScope',slot+','))+`</div>`;
   }).join('')+`<div class="np-foot">אין שיחות בשבת ובחג. מה שקורה בלילה (22:00–08:00) מגיע בבוקר.</div>`;
 }
 // Server rule (api/_lib/yemot.js): only explicitly checked kinds call.
 function _editMyPhone(slot,fn){
-  const f=_myFam();if(!f)return;
+  const f=_npFam();if(!f)return;
   const cur=_parentPhone(f,slot);if(!cur)return;
   const next={phone:cur.phone,cats:{...(cur.cats||{})},scopes:{...(cur.scopes||{})},...(cur.off?{off:true}:{}),...(cur.mode?{mode:cur.mode}:{}),...(cur.testedTz?{testedTz:cur.testedTz}:{})};
   fn(next);
@@ -3485,14 +3498,14 @@ function _editMyPhone(slot,fn){
 }
 // Off keeps the number and its choices, just stops all calls to it.
 function togglePhoneOn(slot,on){
-  const wasOff=!!_parentPhone(_myFam(),slot)?.off;
+  const wasOff=!!_parentPhone(_npFam(),slot)?.off;
   _editMyPhone(slot,n=>{if(on)delete n.off;else n.off=true;});
-  if(on&&wasOff)_notifyAdminSignup(_myFam(),slot,'הפעיל/ה שיחות לפלאפון הכשר');
+  if(on&&wasOff&&!_npAs)_notifyAdminSignup(_npFam(),slot,'הפעיל/ה שיחות לפלאפון הכשר');
 }
 // One test tzintuk per number, from the 🔔 window; once it went out the
 // button is gone (testedTz). The admin's person-modal test has no limit.
 async function sendMyTestTzintuk(slot){
-  const f=_myFam();const cur=f&&_parentPhone(f,slot);if(!cur)return;
+  const f=_npFam();const cur=f&&_parentPhone(f,slot);if(!cur)return;
   const st=document.getElementById('npTzStatus'+slot);
   const say=(t,c)=>{if(st){st.textContent=t;st.style.color=c||'var(--text2)';}};
   say('שולח...');
@@ -3505,7 +3518,7 @@ async function sendMyTestTzintuk(slot){
   }catch(e){say('השליחה נכשלה: '+e.message,'var(--red-mid)');}
 }
 // 'call' (default) or 'tzintuk': see api/_lib/yemot.js runTzintuk.
-function setPhoneMode(slot,mode){_editMyPhone(slot,n=>{if(mode==='tzintuk')n.mode='tzintuk';else delete n.mode;});}
+function setPhoneMode(slot,mode){_editMyPhone(slot,n=>{n.mode=mode==='tzintuk'?'tzintuk':'call';});}
 function togglePhoneCat(slot,id,on){_editMyPhone(slot,n=>{n.cats[id]=!!on;});}
 function setPhoneScope(slot,id,scope){_editMyPhone(slot,n=>{n.scopes[id]=scope;});}
 
@@ -3567,14 +3580,14 @@ function _notifyAdminSignup(f,slot,text){
   if(notifications[0])notifications[0].hiddenFrom=families.map(x=>x.id).filter(id=>id!=null);
 }
 function toggleNotifEmailMode(on){
-  const fid=_myFamId();const f=fid!=null?getFam(fid):null;
-  const slot=_myEmailSlot();
+  const f=_npFam();
+  const slot=_npSlot();
   if(!f||!slot)return;
   if(on){
     if(!f.notifEmailPref)f.notifEmailPref={};
     if(!f.notifEmailPref[slot]){
       f.notifEmailPref[slot]={cats:Object.fromEntries(NOTIF_EMAIL_CATS.map(c=>[c.id,c.def!==false])),scopes:{},push:true};
-      _notifyAdminSignup(f,slot,'נרשמ/ה להתראות במייל');
+      if(!_npAs)_notifyAdminSignup(f,slot,'נרשמ/ה להתראות במייל');
     }
   }else if(f.notifEmailPref){
     delete f.notifEmailPref[slot];
@@ -3584,16 +3597,16 @@ function toggleNotifEmailMode(on){
   showToast('✓ ההעדפה נשמרה',2000);
 }
 function toggleNotifEmailCat(catId,on){
-  const fid=_myFamId();const f=fid!=null?getFam(fid):null;
-  const slot=_myEmailSlot();
+  const f=_npFam();
+  const slot=_npSlot();
   const pref=(f&&slot)?f.notifEmailPref?.[slot]:null;if(!pref)return;
   pref.cats[catId]=on;
   save();renderNotifPrefModal();
   showToast('✓ ההעדפה נשמרה',1500);
 }
 function setNotifEmailScope(catId,scope){
-  const fid=_myFamId();const f=fid!=null?getFam(fid):null;
-  const slot=_myEmailSlot();
+  const f=_npFam();
+  const slot=_npSlot();
   const pref=(f&&slot)?f.notifEmailPref?.[slot]:null;if(!pref)return;
   if(!pref.scopes)pref.scopes={};
   if((pref.scopes[catId]==='mine'?'mine':'all')===scope)return;
@@ -3674,6 +3687,7 @@ async function renderNotifDevicesModal(){
         <div style="font-size:13px;font-weight:700">${esc(who)}${pref.push!==true?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔕 רק מייל</span>':''}</div>
         <div style="font-size:11px;color:var(--text2);margin-top:2px">${esc(email)}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">${catLabels.length?esc(catLabels.join(' · ')):'לא סימנו אף קטגוריה'}</div>
+        <button type="button" onclick="closeNotifDevicesModal();openNotifPrefFor(${f.id},${slot},'email')" style="margin-top:6px;padding:4px 12px;border-radius:14px;border:1.5px solid var(--border);background:transparent;color:var(--blue-mid);font-size:11px;font-weight:700;font-family:var(--font);cursor:pointer">✏️ שינוי ההגדרות</button>
       </div>`;
     }).join(''):'<div class="empty" style="padding:20px 0"><span class="empty-ico">📧</span>אף אחד לא רשום להתראות במייל</div>';
     const phoneRows=[];
@@ -3686,6 +3700,7 @@ async function renderNotifDevicesModal(){
         <div style="font-size:13px;font-weight:700">${esc(_regDisplayName(f,slot))}${p.off?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔕 כבוי</span>':''}${!p.off&&p.mode==='tzintuk'?' <span style="font-size:10px;background:var(--surface2);color:var(--text2);padding:1px 7px;border-radius:10px">🔔 צינתוק</span>':''}</div>
         <div style="font-size:11px;color:var(--text2);margin-top:2px;direction:ltr;text-align:right">📞 ${esc(p.phone)}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6">${chosen.length?esc(chosen.join(' · ')):'לא סימנו אף התראה'}</div>
+        <button type="button" onclick="closeNotifDevicesModal();openNotifPrefFor(${f.id},${slot},'phone')" style="margin-top:6px;padding:4px 12px;border-radius:14px;border:1.5px solid var(--border);background:transparent;color:var(--blue-mid);font-size:11px;font-weight:700;font-family:var(--font);cursor:pointer">✏️ שינוי ההגדרות</button>
       </div>`;
     }).join(''):'<div class="empty" style="padding:20px 0"><span class="empty-ico">📞</span>אף אחד לא רשום לשיחות לטלפון כשר</div>';
     const tabs=[['push','🔔 פוש',rows.length],['email','📧 מייל',emailRows.length],['phone','📞 שיחה',phoneRows.length]];
@@ -5920,6 +5935,7 @@ function _renderPersonPhoneSection(f,slot){
     <input type="tel" id="personKosherPhone" inputmode="tel" autocomplete="tel" placeholder="מספר טלפון, למשל 0527123456" value="${esc(cur?.phone||'')}"
       style="width:100%;border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 12px;font-size:14px;font-family:var(--font);background:var(--bg);color:var(--text);box-sizing:border-box;direction:ltr;text-align:right">
     <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.5">מה יגיע בשיחה בוחרים בכפתור ההתראות 🔔 למעלה.</div>
+    ${editMode?`<button type="button" onclick="openNotifPrefFor(${f.id},${slot},'phone')" style="margin-top:8px;padding:6px 12px;border-radius:14px;border:1.5px solid var(--border);background:transparent;color:var(--blue-mid);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">🔔 הגדרות ההתראות של ההורה (מייל ופלאפון)</button>`:''}
     ${editMode?`<button type="button" onclick="testKosherPhoneCall('tzintuk')" style="margin-top:10px;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">🔔 צינתוק בדיקה</button><div id="personPhoneTestStatus" style="font-size:12px;margin-top:6px"></div>`:''}`;
 }
 async function testKosherPhoneCall(mode){
@@ -6343,7 +6359,8 @@ function savePerson(){
     if(isP1){if(username)f.username=username;else delete f.username;}else{if(username)f.username2=username;else delete f.username2;}
     // Keep the call choices (set in the 🔔 window); a new number starts on the defaults.
     const prevPhone=_parentPhone(f,isP1?1:2);
-    _setParentPhone(f,isP1?1:2,phone?{...(prevPhone||{}),phone,cats:prevPhone?.cats||Object.fromEntries(PHONE_CATS.map(c=>[c.id,!!c.def]))}:null);
+    // A new number starts as a tzintuk (cheaper); an existing one keeps its mode.
+    _setParentPhone(f,isP1?1:2,phone?{...(prevPhone||{}),phone,cats:prevPhone?.cats||Object.fromEntries(PHONE_CATS.map(c=>[c.id,!!c.def])),...(prevPhone?{}:{mode:'tzintuk'})}:null);
     const email=_cleanEmail(document.getElementById('personEmail').value)||'';
     const prevEmail=isP1?f.email:f.email2;
     if(isP1){f.email=email;f.emailName=name;}else{f.email2=email;f.emailName2=name;}
