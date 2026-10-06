@@ -7976,8 +7976,9 @@ function openClaimsModal(){
       </div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:8px">${evName} · ${esc(c.date||'')}</div>
       <div style="display:flex;gap:6px">
-        ${ev?`<button onclick="goToClaimEvent(${c.id},${c.evId})" style="flex:1;padding:7px;border-radius:8px;border:none;background:var(--blue-mid);color:#fff;font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">↗ פתח אירוע</button>`:''}
-        <button onclick="dismissClaim(${c.id})" style="flex:1;padding:7px;border-radius:8px;border:1.5px solid var(--border);background:transparent;color:var(--text2);font-size:12px;font-weight:600;font-family:var(--font);cursor:pointer">✓ טופל</button>
+        ${ev?`<button onclick="approveClaim(${c.id})" style="flex:1.4;padding:7px;border-radius:8px;border:none;background:var(--green-mid);color:#fff;font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">✓ אשר ורשום</button>
+        <button onclick="goToClaimEvent(${c.id},${c.evId})" style="flex:1;padding:7px;border-radius:8px;border:none;background:var(--blue-bg);color:var(--blue-mid);font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">↗ אירוע</button>`:''}
+        <button onclick="dismissClaim(${c.id})" style="flex:1;padding:7px;border-radius:8px;border:1.5px solid var(--border);background:transparent;color:var(--text2);font-size:12px;font-weight:600;font-family:var(--font);cursor:pointer">✗ בטל</button>
       </div>
     </div>`;
   }).join('');
@@ -7990,6 +7991,23 @@ function closeClaimsModal(){
 function dismissClaim(claimId){
   paymentClaims=paymentClaims.filter(c=>c.id!==claimId);
   save();renderClaimsBanner();openClaimsModal();
+}
+// "שילמתי" from the email: approving records the payment into the event the
+// same way the event card's pay button does (payToPot), capped at what the
+// family still owes — before this, approving only removed the request.
+function approveClaim(claimId){
+  const c=paymentClaims.find(x=>x.id===claimId);if(!c)return;
+  const ev=events.find(e=>e.id===c.evId);
+  if(!ev||!getFam(c.famId)){dismissClaim(claimId);return;}
+  const adj=evAdjBalance(ev);
+  const tOwed=Math.min(evTreasurerOwed(ev,c.famId),Math.max(0,-(adj[c.famId]||0)));
+  const owed=Math.round(Math.max(0,-(adj[c.famId]||0))-tOwed);
+  paymentClaims=paymentClaims.filter(x=>x.id!==claimId);
+  if(owed<=0){save();renderClaimsBanner();openClaimsModal();showToast('המשפחה כבר מסודרת באירוע הזה — לא נרשם תשלום',3500);return;}
+  const amt=Math.min(Math.round(c.amt),owed);
+  payToPot(ev.id,c.famId,amt); // saves and re-renders
+  renderClaimsBanner();openClaimsModal();
+  showToast('✓ נרשם תשלום ₪'+amt.toLocaleString()+(amt<c.amt?' (מה שנשאר לשלם)':''),3000);
 }
 function goToClaimEvent(claimId,evId){
   dismissClaim(claimId);
