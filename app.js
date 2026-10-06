@@ -703,16 +703,26 @@ function sendSettledEmail(ev,famId){
   const spent=Math.round(ev.expenses?(ev.expenses[famId]||0):(ev.expenseItems||[]).reduce((s,it)=>s+itemPayerAmt(it,famId),0));
   const lines=[];
   const _sfByName=n=>families.find(x=>x.name===n||x.name.replace(/^משפחת\s*/,'')===n);
-  const _potTotal=Math.round((ev.potPayments||[]).filter(p=>Number(p.famId)===Number(famId)).reduce((s,p)=>s+p.amt,0));
+  // Everything this family put into the pot — what's still there plus what
+  // was already passed on to creditors (ev.settled method 'pot') or refunded —
+  // same as the close email. Counting only what's still in the pot dropped a
+  // deposit from the summary once the pot had been paid out.
+  const _potPend=Math.round((ev.potPayments||[]).filter(p=>Number(p.famId)===Number(famId)).reduce((s,p)=>s+p.amt,0));
+  const _potDist=Math.round((ev.settled||[]).filter(s=>s.method==='pot'&&Number(s.fromFid)===Number(famId)&&Number(s.toFid)!==Number(famId)).reduce((s,t)=>s+t.amt,0));
+  const _potExcess=Math.round((fund.transactions||[]).filter(t=>Number(t.famId)===Number(famId)&&t.type==='deposit'&&(t.desc||'').includes('החזר עודף מקופת האירוע')&&(t.evId!=null?t.evId===ev.id:(t.desc||'').includes(ev.name))).reduce((s,t)=>s+t.amount,0));
+  const _potTotal=_potPend+_potDist+_potExcess;
   const _fromFundToPot=Math.round((fund.transactions||[])
     .filter(t=>Number(t.famId)===Number(famId)&&t.type==='payout'&&(t.desc||'').includes('העברה לקופת האירוע')&&(t.evId!=null?t.evId===ev.id:(t.desc||'').includes(ev.name)))
     .reduce((s,t)=>s+t.amount,0));
   if(_potTotal>0.5){
-    if(_fromFundToPot>0.5&&_fromFundToPot===_potTotal) lines.push(`העברת מהארנק ₪${_potTotal.toLocaleString()} לקופת האירוע`);
+    if(_fromFundToPot>0.5&&Math.abs(_fromFundToPot-_potTotal)<=1) lines.push(`העברת מהארנק ₪${_fromFundToPot.toLocaleString()} לקופת האירוע`);
     else{
       lines.push(`הפקדת לקופת האירוע: ₪${_potTotal.toLocaleString()}`);
       if(_fromFundToPot>0.5) lines.push(`מתוכם ₪${_fromFundToPot.toLocaleString()} הועברו מהארנק`);
     }
+    if(_potExcess>0.5) lines.push(`היתרה ₪${_potExcess.toLocaleString()} עברה לארנק`);
+  } else if(_fromFundToPot>0.5){
+    lines.push(`העברת מהארנק ₪${_fromFundToPot.toLocaleString()} לתשלום האירוע`);
   }
   const _potRec=Math.round((ev.settled||[]).filter(s=>s.method==='pot'&&Number(s.toFid)===Number(famId)).reduce((s,t)=>s+t.amt,0));
   const _toFundFromPot=Math.round((fund.transactions||[])
@@ -7193,7 +7203,7 @@ function _sendCloseEvEmailOne(ev,fid){
     .filter(t=>Number(t.famId)===Number(fid)&&t.type==='payout'&&(t.desc||'').includes('העברה לקופת האירוע')&&(t.evId!=null?t.evId===ev.id:(t.desc||'').includes(ev.name)))
     .reduce((s,t)=>s+t.amount,0));
   if(_myTotalPot>0.5){
-    if(_fromFundToPot>0.5&&_fromFundToPot===_myTotalPot){
+    if(_fromFundToPot>0.5&&Math.abs(_fromFundToPot-_myTotalPot)<=1){
       settleLines.push(`העברת מהארנק ₪${_myTotalPot.toLocaleString()} לקופת האירוע`);
     } else {
       settleLines.push(`הפקדת לקופת האירוע: ₪${_myTotalPot.toLocaleString()}`);
