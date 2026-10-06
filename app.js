@@ -6545,11 +6545,9 @@ function renderShabbatIfOpen(){
   const st=body.scrollTop;
   if(_shbTab==='sum'){body.innerHTML=_shbSummary();return;}
   const cur=_shbThis();
-  const ahead=[1,2,3,4,5].map(i=>_shbRow(_shbAdd(cur,i),i===1?'שבת הבאה':''));
   const past=[];for(let i=1;i<=_shbShowPast;i++)past.push(_shbRow(_shbAdd(cur,-i),i===1?'שבת שעברה':''));
   body.innerHTML=`<div style="font-size:12px;color:var(--text2);margin-bottom:10px">לוחצים על משפחה כדי לסמן שהיא הייתה (או מגיעה). כל אחד יכול לרשום את כולם.</div>
     ${_shbRow(cur,'השבת')}
-    <div style="font-size:12px;font-weight:700;color:var(--text2);margin:14px 0 8px">שבתות קדימה</div>${ahead.join('')}
     <div style="font-size:12px;font-weight:700;color:var(--text2);margin:14px 0 8px">שבתות קודמות</div>${past.join('')}
     <button type="button" onclick="shabbatMorePast()" style="width:100%;padding:9px;border-radius:var(--r2);border:1.5px dashed var(--border);background:transparent;color:var(--text2);font-size:13px;font-weight:700;font-family:var(--font);cursor:pointer">עוד שבתות קודמות</button>`;
   body.scrollTop=st;
