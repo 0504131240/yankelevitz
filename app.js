@@ -1139,6 +1139,13 @@ async function load(){
     try{_restoreAllFromLocalCache();}catch(e2){}
     showSyncStatus('⚠ מקומי בלבד',3000);
   }finally{
+    // Baseline = what's in Firestore, BEFORE the migrations below change
+    // anything. save()'s freshness check keeps any field that differs from
+    // the baseline; baselining after the migrations made it see "nothing
+    // changed here" and pull the old server value right back — so the fix
+    // never stuck and every load re-saved the same data ("שומר..." on each
+    // refresh).
+    _captureSyncBaseline();
     let _savAmtMigrated=false;
     events.forEach(ev=>{
       if(ev.savingsAmt==null)return;
@@ -1170,11 +1177,6 @@ async function load(){
     });
     let _pollsMigrated=false;
     polls.forEach(p=>{if(_migratePoll(p))_pollsMigrated=true;});
-    // This freshly loaded (and now migrated) state IS what's in Firestore
-    // as far as this device knows — baseline it before the migration
-    // save() below, so that save()'s own staleness check has an accurate
-    // "what did I last know to match remote" to compare against.
-    _captureSyncBaseline();
     if(_savAmtMigrated||_kidsMigrated||_bdaysCleared||_treeMigrated||_pollsMigrated)save();
     render();setTimeout(handleHash,100);
     if(!_isAdminPage()){
