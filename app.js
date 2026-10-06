@@ -5549,7 +5549,7 @@ function renderArchive(){
         <div style="flex:1">
           <div class="acard-title">🔒 ${esc(ev.name)}</div>
           <div class="acard-meta">${ev.date&&ev.date!=='לא צוין'?esc(ev.date)+' · ':''}${ev.participants.length} משפחות · ${shareLabel(ev)}</div>
-          ${ev.closedOn?`<div class="acard-closed">נסגר: ${ev.closedOn}</div>`:''}
+          ${ev.closedOn&&ev.closedOn!=='היום'?`<div class="acard-closed">נסגר: ${esc(ev.closedOn)}</div>`:''}
           ${exclLine}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
@@ -7332,7 +7332,7 @@ function _sendCloseEvEmailOne(ev,fid){
 }
 function archiveEv(evId){
   const ev=events.find(e=>e.id===evId);if(!ev)return;
-  ev.open=false;ev.closedOn='היום';
+  ev.open=false;ev.closedOn=new Date().toLocaleDateString('he-IL');
   // Participants who already got their own personalized "האירוע הסתיים"
   // summary email (see _sendCloseEvEmailOne, tracked per-device by the
   // closemail-<evId>-<fid> flag it sets) shouldn't also get this broadcast
