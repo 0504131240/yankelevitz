@@ -6398,6 +6398,44 @@ function deletePerson(){
   save();renderFamPeopleGrid();render();closePersonModal();
 }
 
+// ── Phone line call log (written by api/yemot-ivr.js into appData/phoneLog) ──
+async function openPhoneLogModal(){
+  let m=document.getElementById('phoneLogModal');
+  if(!m){
+    m=document.createElement('div');m.id='phoneLogModal';
+    m.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2500;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
+    m.onclick=e=>{if(e.target===m)m.style.display='none';};
+    m.innerHTML=`<div style="background:var(--bg);border-radius:var(--r2);max-width:440px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+        <span style="font-size:15px;font-weight:800;color:var(--text)">📞 יומן שיחות לקו</span>
+        <button onclick="document.getElementById('phoneLogModal').style.display='none'" aria-label="סגירה" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text2);line-height:1;padding:0">✕</button>
+      </div>
+      <div id="phoneLogBody" style="flex:1;overflow-y:auto;padding:4px 16px 14px"></div>
+    </div>`;
+    document.body.appendChild(m);
+  }
+  const body=document.getElementById('phoneLogBody');
+  body.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2)">טוען...</div>';
+  m.style.display='flex';
+  let calls=[];
+  try{
+    const {db,doc,getDoc}=await fbInit();
+    const snap=await getDoc(doc(db,'appData','phoneLog'));
+    calls=(snap.exists()&&snap.data().calls)||[];
+  }catch(e){body.innerHTML='<div style="padding:20px;text-align:center;color:var(--red-mid)">⚠️ טעינת היומן נכשלה — בדקו את החיבור</div>';return;}
+  if(!calls.length){body.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);line-height:1.6">עוד לא נרשמו שיחות.<br>כל שיחה לקו מעכשיו תופיע כאן.</div>';return;}
+  const when=ts=>{const d=new Date(ts),t=d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});const days=Math.floor((new Date().setHours(0,0,0,0)-new Date(ts).setHours(0,0,0,0))/864e5);return (days===0?'היום':days===1?'אתמול':d.toLocaleDateString('he-IL'))+' · '+t;};
+  body.innerHTML=calls.map(c=>{
+    const f=c.famId!=null?getFam(c.famId):null;
+    const who=c.known?(esc(c.name||(f?f.name.replace('משפחת','').trim():'')||'משפחה')):'מספר לא מוכר';
+    return`<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)">
+      ${f?famAva(f,32):`<div style="width:32px;height:32px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;flex-shrink:0">❓</div>`}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;gap:8px"><span style="font-size:13px;font-weight:700;color:var(--text)">${who}</span><span style="font-size:11px;color:var(--text3);white-space:nowrap">${when(c.ts)}</span></div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">${c.phone4?'מספר שמסתיים ב-'+esc(c.phone4)+' · ':''}${c.known?((c.actions||[]).length?(c.actions||[]).map(esc).join(' · '):'ניתק בתפריט הראשי'):'נותק — המספר לא רשום באתר'}</div>
+      </div></div>`;}).join('');
+}
+
 // ── Shabbat at the parents' ────────────────────────────────────────────────
 // A log of which families came for each Shabbat, kept in shabbatVisits keyed
 // by the Saturday's date. Anyone may mark anyone. The hosts are the family

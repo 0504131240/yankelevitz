@@ -171,6 +171,25 @@ function updatesInfo(data, fam) {
 }
 const INFO = { 1: walletInfo, 2: eventsInfo, 3: occasionsInfo, 4: updatesInfo };
 
+// ── Call log ─────────────────────────────────────────────────────────────
+// Every call into the line, newest first, in appData/phoneLog (shown in the
+// admin page's "יומן שיחות לקו"): who called, when, and what they did there.
+const LOG_MAX = 200;
+const MAIN_ACTIONS = { 1: 'מידע מהאתר', 2: 'סקרים', 3: 'שמיעת הודעות', 4: 'השארת הודעה', 5: 'חדר ועידה' };
+const INFO_ACTIONS = { 1: 'ארנק וחובות', 2: 'אירועים פתוחים', 3: 'ימי הולדת ושמחות', 4: 'עדכונים' };
+async function logCall(db, callId, who, action) {
+  try {
+    const ref = db.doc('appData/phoneLog');
+    await db.runTransaction(async tx => {
+      const calls = ((await tx.get(ref)).data() || {}).calls || [];
+      let c = calls.find(x => x.id === callId);
+      if (!c) { c = { id: callId, ts: Date.now(), ...who, actions: [] }; calls.unshift(c); }
+      if (action && !c.actions.includes(action)) c.actions.push(action);
+      tx.set(ref, { calls: calls.slice(0, LOG_MAX) });
+    });
+  } catch (e) { console.error('yemot-ivr: call log failed', e); }
+}
+
 // ── Call flow ────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   const values = { ...(req.query || {}), ...(req.method === 'POST' && req.body && typeof req.body === 'object' ? req.body : {}) };
@@ -193,7 +212,11 @@ module.exports = async (req, res) => {
   const families = phone ? ((await db.doc('appData/familyPayments').get()).data() || {}).families : null;
   const caller = phone && findCaller(families, phone);
   const fam = caller && caller.fam;
+  // One id per call (Yemot sends the same ApiCallId on every step of it).
+  const callId = String(last(values.ApiCallId) || (phone || 'x') + '-' + Math.floor(Date.now() / 60000));
+  const phone4 = phone ? phone.slice(-4) : '';
   if (!fam) {
+    await logCall(db, callId, { known: false, phone4 }, '');
     // Last digits only, enough to tell which number to check on the site.
     console.log('yemot-ivr: unknown caller ' + (phone ? '…' + phone.slice(-4) : 'with hidden/no number (ApiPhone=' + String(last(values.ApiPhone) || '').slice(-4) + ')'));
     bye(['המספר שממנו התקשרתם לא רשום באתר המשפחה', 'אפשר להוסיף אותו בעריכת המשפחה באתר']); return;
@@ -216,6 +239,13 @@ module.exports = async (req, res) => {
     bye(['אירעה שגיאה בשמירת התשובה', 'נסו שוב מאוחר יותר']); return;
   }
   if (saved) console.log(`yemot-ivr: ${who.key} saved ${saved} answer(s)`);
+  const action = saved ? 'ענה על סקר'
+    : step && step.what === 'main' ? MAIN_ACTIONS[step.digit]
+    : step && step.what === 'info' ? INFO_ACTIONS[step.digit] : '';
+  if (!step || action) {
+    await logCall(db, callId, { known: true, famId: fam.id, slot: caller.slot, phone4,
+      name: [(caller.slot === 2 ? fam.emailName2 : fam.emailName) || '', String(fam.name || '').replace(/^משפחת\s*/, '')].filter(Boolean).join(' ') }, action);
+  }
   if (last(values.hangup) === 'yes') { send('ok'); return; }
 
   // read=<prompt>=<name>,<re-enter if exists>,<max>,<min>,<seconds>,<playback>,<block *>,<block 0>,<replace>,<allowed>,<attempts>,<allow empty>,<empty value>,<keyboard>
