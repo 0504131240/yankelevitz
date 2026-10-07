@@ -6527,7 +6527,7 @@ function renderShabbatPill(){
       <div><div class="ttl">השבת אצל ${esc(_shbHostName())}</div><div class="p">${esc(p?_shbTitle(d):'שבת '+_shbHeb(d))}</div></div>
       <span class="fh-shb-more">כל השבתות ›</span>
     </div>
-    <div class="fh-shb-chips">${_shbVisitors().map(f=>`<button type="button" class="${on.has(f.id)?'on':''}" aria-pressed="${on.has(f.id)}" onclick="toggleShabbatFam('${key}',${f.id})">${on.has(f.id)?'✓ ':''}${esc(_shbShort(f))}</button>`).join('')}</div>`;
+    ${(shabbatVisits[key]||{}).away!=null&&(shabbatVisits[key]||{}).away!==''?`<div style="margin-top:12px;font-size:14px;font-weight:700;background:rgba(255,255,255,.22);border-radius:12px;padding:8px 12px">🚗 השבת ${esc(_shbHostName())} מתארחים ${esc(_shbAwayAt(shabbatVisits[key].away))}</div>`:`<div class="fh-shb-chips">${_shbVisitors().map(f=>`<button type="button" class="${on.has(f.id)?'on':''}" aria-pressed="${on.has(f.id)}" onclick="toggleShabbatFam('${key}',${f.id})">${on.has(f.id)?'✓ ':''}${esc(_shbShort(f))}</button>`).join('')}</div>`}`;
 }
 let _shbOpen=false,_shbShowPast=8,_shbTab='list';
 function _shbEnsureModal(){
@@ -6596,8 +6596,25 @@ function editShabbatNote(key){
   renderShabbatIfOpen();
   _shbWrite(key,{note:e.note});
 }
+// A Shabbat the parents spent away: e.away = the hosting family's id, or
+// 'other' (somewhere else). Picking it replaces the visitor chips.
+let _shbAwayPick=null;
+function _shbAwayName(a){if(a==='other')return 'מקום אחר';const f=getFam(a);return f?_shbShort(f):'';}
+// 'אצל כהן' / 'במקום אחר'
+function _shbAwayAt(a){return a==='other'?'במקום אחר':'אצל '+_shbAwayName(a);}
+function pickShabbatAway(key){_shbAwayPick=_shbAwayPick===key?null:key;renderShabbatIfOpen();}
+function setShabbatAway(key,val){
+  const e=shabbatVisits[key]||{fams:[]};
+  e.away=val;shabbatVisits[key]=e;_shbAwayPick=null;
+  renderShabbatPill();renderShabbatIfOpen();
+  _shbWrite(key,{away:val});
+}
 function _shbRow(d,label){
   const key=_shbKey(d),e=shabbatVisits[key]||{},on=new Set(e.fams||[]);
+  const away=e.away!=null&&e.away!==''?e.away:null,picking=_shbAwayPick===key;
+  const chipCss=sel=>`padding:5px 11px;border-radius:16px;border:1.5px solid ${sel?'#C9792B':'var(--border)'};background:${sel?'#C9792B':'transparent'};color:${sel?'#fff':'var(--text2)'};font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer`;
+  const hostChips=[..._shbVisitors().map(f=>`<button type="button" onclick="setShabbatAway('${key}',${f.id})" style="${chipCss(away===f.id)}">${esc(_shbShort(f))}</button>`),
+    `<button type="button" onclick="setShabbatAway('${key}','other')" style="${chipCss(away==='other')}">מקום אחר</button>`].join('');
   const chips=_shbVisitors().map(f=>{const sel=on.has(f.id);
     return`<button type="button" onclick="toggleShabbatFam('${key}',${f.id})" aria-pressed="${sel}" style="padding:5px 11px;border-radius:16px;border:1.5px solid ${sel?'var(--blue-mid)':'var(--border)'};background:${sel?'var(--blue-mid)':'transparent'};color:${sel?'#fff':'var(--text2)'};font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">${sel?'✓ ':''}${esc(_shbShort(f))}</button>`;}).join('');
   return`<div style="border:1.5px solid ${label?'var(--blue-mid)':'var(--border)'};border-radius:var(--r2);padding:10px 12px;margin-bottom:8px;background:var(--surface)">
@@ -6606,10 +6623,17 @@ function _shbRow(d,label){
       <span style="font-size:11px;color:var(--text3)">${esc(_shbHeb(d))} · ${_shbLat(d)}</span>
       ${label?`<span style="font-size:11px;font-weight:700;color:var(--blue-mid)">${label}</span>`:''}
       <span style="flex:1"></span>
-      <span style="font-size:11px;font-weight:700;color:var(--text2)">${on.size?on.size+' משפחות':''}</span>
+      <span style="font-size:11px;font-weight:700;color:var(--text2)">${away==null&&on.size?on.size+' משפחות':''}</span>
     </div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
-    <button type="button" onclick="editShabbatNote('${key}')" style="margin-top:8px;padding:0;border:none;background:none;font-size:12px;font-family:var(--font);cursor:pointer;color:${e.note?'var(--text)':'var(--text3)'};text-align:right">📝 ${e.note?esc(e.note):'הוספת הערה'}</button>
+    ${picking?`<div style="font-size:12px;font-weight:700;color:#A55A16;margin-bottom:6px">🚗 אצל מי ${esc(_shbHostName())} התארחו?</div><div style="display:flex;flex-wrap:wrap;gap:6px">${hostChips}</div>`
+      :away!=null?`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:#FFF4E5;color:#8A4A0F;font-size:13px;font-weight:700">🚗 ${esc(_shbHostName())} התארחו ${esc(_shbAwayAt(away))}
+          <span style="flex:1"></span><button type="button" onclick="pickShabbatAway('${key}')" style="border:none;background:none;color:#8A4A0F;font-size:12px;font-family:var(--font);cursor:pointer;text-decoration:underline">שינוי</button><button type="button" onclick="setShabbatAway('${key}',null)" aria-label="ביטול" style="border:none;background:none;color:#8A4A0F;font-size:15px;cursor:pointer">✕</button></div>`
+      :`<div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>`}
+    <div style="display:flex;gap:14px;margin-top:8px;flex-wrap:wrap">
+      <button type="button" onclick="editShabbatNote('${key}')" style="padding:0;border:none;background:none;font-size:12px;font-family:var(--font);cursor:pointer;color:${e.note?'var(--text)':'var(--text3)'};text-align:right">📝 ${e.note?esc(e.note):'הוספת הערה'}</button>
+      ${away==null&&!picking?`<button type="button" onclick="pickShabbatAway('${key}')" style="padding:0;border:none;background:none;font-size:12px;font-family:var(--font);cursor:pointer;color:var(--text3)">🚗 ההורים התארחו</button>`:''}
+      ${picking?`<button type="button" onclick="pickShabbatAway('${key}')" style="padding:0;border:none;background:none;font-size:12px;font-family:var(--font);cursor:pointer;color:var(--text3)">ביטול</button>`:''}
+    </div>
   </div>`;
 }
 function _shbSummary(){
@@ -6617,7 +6641,8 @@ function _shbSummary(){
   const since=_shbAdd(_shbThis(),-52),now=_shbThis();
   const rows=_shbVisitors().map(f=>{
     const keys=Object.keys(shabbatVisits).filter(k=>(shabbatVisits[k].fams||[]).includes(f.id)).filter(k=>{const d=_shbDate(k);return d>=since&&d<=now;}).sort();
-    return {f,n:keys.length,last:keys.length?_shbDate(keys[keys.length-1]):null};
+    const hosted=Object.keys(shabbatVisits).filter(k=>shabbatVisits[k].away===f.id).filter(k=>{const d=_shbDate(k);return d>=since&&d<=now;}).length;
+    return {f,n:keys.length,hosted,last:keys.length?_shbDate(keys[keys.length-1]):null};
   }).sort((a,b)=>b.n-a.n||(b.last||0)-(a.last||0));
   const max=Math.max(1,...rows.map(r=>r.n));
   const ago=d=>{if(!d)return'עוד לא נרשם';const w=Math.round((now-d)/(7*864e5));return w===0?'השבת':w===1?'לפני שבוע':'לפני '+w+' שבועות';};
@@ -6627,7 +6652,7 @@ function _shbSummary(){
       <div style="flex:1;min-width:0">
         <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:var(--text)"><span>${esc(_shbShort(r.f))}</span><span style="font-variant-numeric:tabular-nums">${r.n}</span></div>
         <div style="height:6px;border-radius:3px;background:var(--surface2);margin:4px 0 3px;overflow:hidden"><div style="height:100%;width:${Math.round(r.n/max*100)}%;background:var(--blue-mid);border-radius:3px"></div></div>
-        <div style="font-size:11px;color:var(--text3)">אחרונה: ${ago(r.last)}</div>
+        <div style="font-size:11px;color:var(--text3)">אחרונה: ${ago(r.last)}${r.hosted?` · 🚗 אירחו את ${esc(_shbHostName())} ${r.hosted===1?'פעם אחת':r.hosted+' פעמים'}`:''}</div>
       </div></div>`).join('')}`;
 }
 function renderShabbatIfOpen(){
