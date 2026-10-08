@@ -21,6 +21,7 @@ if(/\.github\.io$/.test(location.hostname))location.replace('https://yankeleviz.
 <title>ינקלביץ</title>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="recipes.css">
+<link rel="stylesheet" href="contest.css">
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 </head>
 <body class="at-home">
@@ -58,6 +59,10 @@ if(/\.github\.io$/.test(location.hostname))location.replace('https://yankeleviz.
       <div id="countdownSection"></div>
       <!-- Shabbat at the parents' — this week's parsha, tap a family to mark it -->
       <div id="shabbatHomeCard" class="fh-shb-card"></div>
+      <!-- The families' Shabbat-prep contest (contest.js) -->
+      <button class="fh-tile fh-tile-wide fh-tile-contest" style="background:linear-gradient(135deg,#14919B,#0E7490 55%,#0B2E3F);box-shadow:0 6px 20px rgba(14,116,144,0.3)" onclick="openContestOverlay()">
+        <span class="fh-tile-ico">😜</span><span class="fh-tile-txt"><b>תחרות הכנות לשבת</b><small>משימות, משחקים ונקודות · ננעל בשישי ב-10:00</small></span>
+      </button>
       <div class="fh-tile-grid">
         <button class="fh-tile" style="background:linear-gradient(135deg,#FF6B9D,#FF4757);box-shadow:0 6px 20px rgba(255,71,87,0.3)" onclick="openChatSheet()">
           <span id="chatUnreadBadge" class="fh-tile-badge" style="display:none"></span>
@@ -513,6 +518,7 @@ if(/\.github\.io$/.test(location.hostname))location.replace('https://yankeleviz.
 
 <script src="app.js"></script>
 <script src="recipes.js"></script>
+<script src="contest.js"></script>
 
 <!-- Add expense item modal (cumulative events) -->
 <div id="addExpItemOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1500;align-items:center;justify-content:center;padding:20px;box-sizing:border-box" onclick="if(event.target===this)closeAddExpItem()">

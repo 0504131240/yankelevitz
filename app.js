@@ -7667,6 +7667,7 @@ function handleHash(){
   if(h==='tree'){openFamilyTreeOverlay();return;}
   if(h==='chat'){openChatSheet();return;}
   if(h==='shabbat'){openShabbatModal();return;}
+  if(h==='contest'){if(window.openContestOverlay)openContestOverlay();return;}
   if(h==='fund'){_enterPayShell();openFundDetail();return;}
   const tabMap={events:'nb-events',families:'nb-families'};
   if(tabMap[h]){_enterPayShell();goTab(h,document.getElementById(tabMap[h]),true);return;}

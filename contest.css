@@ -345,3 +345,8 @@
 .sc-music-btn.playing .eq{display:flex}
 .sc-music-btn.muted{opacity:.7}
 @keyframes sc-eq{from{height:2px}to{height:7px}}
+
+/* the home-screen button: the winking face winks now and then */
+.fh-tile-contest .fh-tile-ico{display:inline-block;animation:sc-wink 3.2s ease-in-out infinite;transform-origin:50% 70%}
+@keyframes sc-wink{0%,78%,100%{transform:rotate(0) scale(1)}84%{transform:rotate(-14deg) scale(1.15)}90%{transform:rotate(10deg) scale(1.1)}95%{transform:rotate(-4deg) scale(1.05)}}
+@media (prefers-reduced-motion:reduce){.fh-tile-contest .fh-tile-ico{animation:none}}
