@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
+<script>
+// The GitHub Pages copy (…github.io/yoo/) has no server functions and can lag
+// behind — send anyone who opens it to the same page on the real site.
+if(/\.github\.io$/.test(location.hostname))location.replace('https://yankeleviz.vercel.app'+(location.pathname.replace(/^\/yoo(?=\/|$)/,'')||'/')+location.search+location.hash);
+</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>טופס הוצאות · ינקלביץ</title>

@@ -2,6 +2,11 @@
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
+<script>
+// The GitHub Pages copy (…github.io/yoo/) has no server functions and can lag
+// behind — send anyone who opens it to the same page on the real site.
+if(/\.github\.io$/.test(location.hostname))location.replace('https://yankeleviz.vercel.app'+(location.pathname.replace(/^\/yoo(?=\/|$)/,'')||'/')+location.search+location.hash);
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
